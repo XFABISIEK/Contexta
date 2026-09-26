@@ -2,8 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
   Background,
+  Handle,
+  Position,
   useReactFlow,
   ReactFlowProvider,
+  MarkerType,
   type Node,
   type Edge,
 } from "@xyflow/react";
@@ -39,8 +42,10 @@ function GNode({ data }: { data: { node: GraphNode; selected: boolean } }) {
   const Icon = TYPE_ICON[data.node.node_type] ?? Brain;
   return (
     <div className={cx("gnode", `gnode-${data.node.node_type}`, data.selected && "selected")}>
+      <Handle type="source" position={Position.Left} style={{ opacity: 0 }} />
       <Icon />
       <span className="lbl" title={data.node.label}>{data.node.label}</span>
+      <Handle type="target" position={Position.Right} style={{ opacity: 0 }} />
     </div>
   );
 }
@@ -250,21 +255,29 @@ export function GraphView({ projectId }: { projectId?: string }) {
     [visible, visibleEdgePairs, rootId, selected],
   );
 
-  const edges: Edge[] = useMemo(
-    () =>
-      visibleEdgePairs.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        label: e.relationship === "belongs_to" ? undefined : e.relationship,
-        style:
-          e.relationship === "belongs_to"
-            ? { stroke: "#5b6474", strokeWidth: 2 }
-            : { stroke: "rgba(55,148,255,0.65)", strokeWidth: 2 },
-        labelStyle: { fill: "#9da5b4", fontSize: 9, fontFamily: "var(--font)" },
-      })),
-    [visibleEdgePairs],
-  );
+  const edges: Edge[] = useMemo(() => {
+    const ids = new Set(visible.map((n) => n.id));
+    const dropped = visibleEdgePairs.filter((e) => !ids.has(e.source) || !ids.has(e.target));
+    if (dropped.length > 0) {
+      console.warn(`[graph] ${dropped.length} edges reference missing nodes`, dropped.slice(0, 3));
+    }
+    return visibleEdgePairs
+      .filter((e) => ids.has(e.source) && ids.has(e.target))
+      .map((e) => {
+        const tree = e.relationship === "belongs_to";
+        const color = tree ? "#7b8494" : "rgba(55,148,255,0.8)";
+        return {
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          type: "smoothstep",
+          label: tree ? undefined : e.relationship,
+          style: { stroke: color, strokeWidth: 2 },
+          labelStyle: { fill: "#9da5b4", fontSize: 9, fontFamily: "var(--font)" },
+          markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color },
+        };
+      });
+  }, [visible, visibleEdgePairs]);
 
   const onNodeClick = useCallback(
     async (_: unknown, node: Node) => {
@@ -395,6 +408,7 @@ function FlowCanvas({
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
+      nodesConnectable={false}
       onNodeClick={onNodeClick}
       fitView
       fitViewOptions={{ padding: 0.2 }}

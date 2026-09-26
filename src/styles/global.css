@@ -333,7 +333,7 @@ select.input { width: auto; }
 .gnode-rule { border-left: 2px solid var(--warning); }
 .gnode-skill { border-left: 2px solid #c678dd; }
 .gnode-personal { border-left: 2px solid var(--text-muted); }
-.xyflow, .xyflow__viewport { background: var(--background); }
+.graph-canvas .react-flow { --xy-background-color: var(--background); }
 
 /* ---------- misc ---------- */
 
