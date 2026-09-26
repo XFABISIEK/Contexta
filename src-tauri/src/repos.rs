@@ -353,7 +353,10 @@ pub fn update_memory(conn: &Connection, id: &str, input: UpdateMemory) -> Result
         let _ = t;
         return Err("Memory title must not be empty".to_string());
     }
-    let project_id = input.project_id.filter(|s| !s.is_empty()).or(cur.project_id.clone());
+    let project_id: Option<String> = match input.project_id {
+        None => cur.project_id.clone(),
+        Some(v) => v.filter(|s| !s.is_empty()),
+    };
     let ts = now_ts();
     let n = conn
         .execute(

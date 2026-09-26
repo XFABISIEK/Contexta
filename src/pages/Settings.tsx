@@ -13,7 +13,36 @@ const MCP_TOOLS = [
   { name: "simplememory_get_memories", description: "Ranked memory retrieval with filters.", mapsTo: "list_memories" },
   { name: "simplememory_get_skills", description: "List skills by keyword/category.", mapsTo: "list_skills" },
   { name: "simplememory_get_personal_context", description: "Personal info, only on query match.", mapsTo: "search (personal scope)" },
+  { name: "simplememory_get_graph", description: "Capped relation graph with edges.", mapsTo: "get_graph" },
+  { name: "simplememory_add_memory", description: "AI: store a memory (priority controls context inclusion).", mapsTo: "create_memory" },
+  { name: "simplememory_update_memory", description: "AI: patch a memory; tags replace.", mapsTo: "update_memory" },
+  { name: "simplememory_delete_memory", description: "AI: delete a memory.", mapsTo: "delete_memory" },
+  { name: "simplememory_add_rule", description: "AI: add a project or global rule.", mapsTo: "create_rule" },
+  { name: "simplememory_update_rule", description: "AI: replace a rule.", mapsTo: "update_rule" },
+  { name: "simplememory_delete_rule", description: "AI: delete a rule.", mapsTo: "delete_rule" },
+  { name: "simplememory_add_skill", description: "AI: add a reusable skill.", mapsTo: "create_skill" },
+  { name: "simplememory_update_skill", description: "AI: replace a skill.", mapsTo: "update_skill" },
+  { name: "simplememory_delete_skill", description: "AI: delete a skill.", mapsTo: "delete_skill" },
+  { name: "simplememory_add_project", description: "AI: create a project.", mapsTo: "create_project" },
+  { name: "simplememory_update_project", description: "AI: rename / re-describe a project.", mapsTo: "update_project" },
+  { name: "simplememory_delete_project", description: "AI: delete a project.", mapsTo: "delete_project" },
+  { name: "simplememory_add_personal", description: "AI: store a personal entry (stays local).", mapsTo: "create_personal" },
+  { name: "simplememory_update_personal", description: "AI: replace a personal entry.", mapsTo: "update_personal" },
+  { name: "simplememory_delete_personal", description: "AI: delete a personal entry.", mapsTo: "delete_personal" },
+  { name: "simplememory_link", description: "AI: relate two entities (project uses skill…).", mapsTo: "create_connection" },
+  { name: "simplememory_unlink", description: "AI: remove a relation.", mapsTo: "delete_connection" },
 ];
+
+const MCP_CLIENT_CONFIG = `{
+  "mcpServers": {
+    "simplememory": {
+      "command": "<path-to>\\\\simplememory-mcp.exe",
+      "env": {
+        "SIMPLEMEMORY_DB": "<appdata>\\\\com.simplememory.app\\\\simplememory.db"
+      }
+    }
+  }
+}`;
 
 export function Settings() {
   const toast = useApp((s) => s.toast);
@@ -113,7 +142,7 @@ export function Settings() {
 
   const copyMcpSpec = async () => {
     const spec = {
-      transport: "stdio (planned)",
+      transport: "stdio (simplememory-mcp binary)",
       tools: MCP_TOOLS.map((t) => ({ name: t.name, description: t.description, mapsTo: t.mapsTo })),
       example: {
         tool: "simplememory_get_project_context",
@@ -204,9 +233,11 @@ export function Settings() {
         <div className="section-head"><span className="section-title">MCP</span></div>
         <div className="card">
           <p className="mono-dim" style={{ marginTop: 0 }}>
-            <Plug size={12} style={{ display: "inline", verticalAlign: -1 }} /> Model Context Protocol over stdio.
-            Each tool maps 1:1 to a local Tauri command — no HTTP server, no network.
+            <Plug size={12} style={{ display: "inline", verticalAlign: -1 }} /> Model Context Protocol over stdio —
+            read <em>and</em> write. Build: <span className="code">cargo build --release --bin simplememory-mcp</span>,
+            then point any MCP client at the exe. No HTTP server, no network.
           </p>
+          <div className="md-preview" style={{ marginBottom: 10 }}>{MCP_CLIENT_CONFIG}</div>
           <div className="list" style={{ marginBottom: 10 }}>
             {MCP_TOOLS.map((t) => (
               <div key={t.name} className="row" style={{ cursor: "default" }}>
@@ -218,7 +249,22 @@ export function Settings() {
               </div>
             ))}
           </div>
-          <button className="btn sm" onClick={copyMcpSpec}><Copy size={14} /> Copy tool spec (JSON)</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn sm" onClick={copyMcpSpec}><Copy size={14} /> Copy tool spec (JSON)</button>
+            <button
+              className="btn sm"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(MCP_CLIENT_CONFIG);
+                  toast("success", "Client config copied");
+                } catch {
+                  toast("error", "Clipboard unavailable");
+                }
+              }}
+            >
+              <Copy size={14} /> Copy client config
+            </button>
+          </div>
         </div>
       </div>
 

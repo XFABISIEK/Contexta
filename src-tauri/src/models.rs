@@ -54,7 +54,8 @@ pub struct NewMemory {
 pub struct UpdateMemory {
     pub title: Option<String>,
     pub content: Option<String>,
-    pub project_id: Option<String>,
+    /// None = keep, Some(None) = detach, Some(Some(id)) = assign.
+    pub project_id: Option<Option<String>>,
     pub memory_type: Option<String>,
     pub priority: Option<String>,
     pub source: Option<String>,

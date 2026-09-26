@@ -1,10 +1,10 @@
-mod commands;
-mod context;
-mod db;
-mod graph;
-mod models;
-mod repos;
-mod search;
+pub mod commands;
+pub mod context;
+pub mod db;
+pub mod graph;
+pub mod models;
+pub mod repos;
+pub mod search;
 
 use std::path::PathBuf;
 use std::sync::Mutex;

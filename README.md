@@ -100,9 +100,17 @@ repos.rs (CRUD, pagination, tags, export/import) · db.rs (connection, migration
 
 ## MCP (Model Context Protocol)
 
-Target transport is **stdio** (no public HTTP server). Each tool maps 1:1 to a
-local command; the full spec (names, descriptions, example I/O) is copyable
-from Settings → MCP:
+Transport is **stdio** via the standalone binary — no public HTTP server:
+
+```bash
+cargo build --release --bin simplememory-mcp
+```
+
+Point any MCP client (Claude Desktop, Cursor, …) at the exe, optionally with
+`SIMPLEMEMORY_DB` pointing at the app database (default:
+`%APPDATA%/com.simplememory.app/simplememory.db`).
+
+Read tools (context retrieval):
 
 - `simplememory_search` → `search_everything`
 - `simplememory_get_project` → `get_project`
@@ -111,6 +119,19 @@ from Settings → MCP:
 - `simplememory_get_memories` → `list_memories`
 - `simplememory_get_skills` → `list_skills`
 - `simplememory_get_personal_context` → personal-scoped search
+- `simplememory_get_graph` → `get_graph`
+
+Write tools (AI can store and curate memory, same validation as the UI):
+
+- `simplememory_add_memory` / `_update_memory` / `_delete_memory`
+- `simplememory_add_rule` / `_update_rule` / `_delete_rule`
+- `simplememory_add_skill` / `_update_skill` / `_delete_skill`
+- `simplememory_add_project` / `_update_project` / `_delete_project`
+- `simplememory_add_personal` / `_update_personal` / `_delete_personal`
+- `simplememory_link` / `simplememory_unlink`
+
+The full tool spec (names, JSON schemas, example I/O) is copyable from
+Settings → MCP, alongside a client config snippet.
 
 Example:
 
