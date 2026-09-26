@@ -50,9 +50,9 @@ const nodeTypes = { gnode: GNode };
 const LAYER_ORDER = ["project", "memory", "rule", "skill", "personal"];
 
 /**
- * Tidy tree layout: BFS layers from a root project over the visible edges,
- * each layer vertically centered. Disconnected nodes land in extra layers
- * below instead of stretching one giant column.
+ * Radial tree layout (Obsidian-style): roots at the center, children fanned
+ * out on concentric rings with angle proportional to subtree size.
+ * Deterministic, no simulation, draggable afterwards.
  */
 function layoutTree(
   nodes: GraphNode[],
@@ -70,71 +70,110 @@ function layoutTree(
   };
   edges.forEach((e) => link(e.source, e.target));
 
-  const depth = new Map<string, number>();
-  const queue: string[] = [];
-  const seed = (id: string) => {
-    if (byId.has(id) && !depth.has(id)) {
-      depth.set(id, 0);
-      queue.push(id);
-    }
-  };
-  if (rootId) seed(rootId);
-  // Forest fallback: every project is a root, then anything still orphaned.
-  nodes
-    .filter((n) => n.node_type === "project")
-    .forEach((n) => seed(n.id));
-  if (depth.size === 0 && nodes[0]) seed(nodes[0].id);
+  const roots: string[] = [];
+  if (rootId && byId.has(rootId)) {
+    roots.push(rootId);
+  } else {
+    nodes.filter((n) => n.node_type === "project").forEach((n) => roots.push(n.id));
+    if (roots.length === 0 && nodes[0]) roots.push(nodes[0].id);
+  }
 
+  // BFS: parent + depth, children in stable type/label order.
+  const parent = new Map<string, string | null>();
+  const queue: string[] = [];
+  roots.forEach((r) => {
+    parent.set(r, null);
+    queue.push(r);
+  });
   while (queue.length > 0) {
     const cur = queue.shift()!;
-    const d = depth.get(cur)!;
-    for (const nb of adj.get(cur) ?? []) {
-      if (!depth.has(nb)) {
-        depth.set(nb, d + 1);
-        queue.push(nb);
-      }
+    const kids = [...(adj.get(cur) ?? [])].filter((nb) => !parent.has(nb));
+    kids.sort((a, b) => {
+      const na = byId.get(a)!;
+      const nb = byId.get(b)!;
+      return (
+        LAYER_ORDER.indexOf(na.node_type) - LAYER_ORDER.indexOf(nb.node_type) ||
+        na.label.localeCompare(nb.label)
+      );
+    });
+    for (const nb of kids) {
+      parent.set(nb, cur);
+      queue.push(nb);
     }
   }
-  // Orphans without any path: stack them in their own layers at the bottom.
-  let maxDepth = 0;
-  depth.forEach((d) => {
-    maxDepth = Math.max(maxDepth, d);
+
+  const children = new Map<string, string[]>();
+  parent.forEach((p, id) => {
+    if (p) {
+      if (!children.has(p)) children.set(p, []);
+      children.get(p)!.push(id);
+    }
   });
-  nodes.forEach((n) => {
-    if (!depth.has(n.id)) {
-      maxDepth += 1;
-      depth.set(n.id, maxDepth);
+  const orphans = nodes.filter((n) => !parent.has(n.id)).map((n) => n.id);
+
+  const leaves = new Map<string, number>();
+  const countLeaves = (id: string): number => {
+    const kids = children.get(id) ?? [];
+    if (kids.length === 0) {
+      leaves.set(id, 1);
+      return 1;
+    }
+    const s = kids.reduce((a, k) => a + countLeaves(k), 0);
+    leaves.set(id, s);
+    return s;
+  };
+  roots.forEach(countLeaves);
+
+  const RING = 380;
+  const pos = new Map<string, { x: number; y: number }>();
+  if (roots.length === 1) {
+    pos.set(roots[0], { x: 0, y: 0 });
+  } else {
+    roots.forEach((r, i) => {
+      const a = (i / roots.length) * Math.PI * 2 - Math.PI / 2;
+      pos.set(r, { x: Math.cos(a) * RING * 0.6, y: Math.sin(a) * RING * 0.6 });
+    });
+  }
+
+  const place = (id: string, a0: number, a1: number, radius: number) => {
+    const kids = children.get(id) ?? [];
+    if (kids.length === 0) return;
+    const total = kids.reduce((s, k) => s + (leaves.get(k) ?? 1), 0);
+    let a = a0;
+    for (const k of kids) {
+      const w = ((leaves.get(k) ?? 1) / total) * (a1 - a0);
+      const mid = a + w / 2;
+      pos.set(k, { x: Math.cos(mid) * radius, y: Math.sin(mid) * radius });
+      place(k, a, a + w, radius + 320);
+      a += w;
+    }
+  };
+  roots.forEach((r, i) => {
+    if (roots.length === 1) {
+      place(r, -Math.PI, Math.PI, RING);
+    } else {
+      const span = (Math.PI * 2) / roots.length;
+      const c = (i / roots.length) * Math.PI * 2 - Math.PI / 2;
+      place(r, c - span / 2, c + span / 2, RING);
     }
   });
 
-  const layers = new Map<number, GraphNode[]>();
-  nodes.forEach((n) => {
-    const d = depth.get(n.id)!;
-    if (!layers.has(d)) layers.set(d, []);
-    layers.get(d)!.push(n);
+  // Disconnected nodes: outer ring instead of random drift.
+  let maxR = RING;
+  pos.forEach((p) => {
+    maxR = Math.max(maxR, Math.hypot(p.x, p.y));
   });
-  layers.forEach((layer) =>
-    layer.sort(
-      (a, b) =>
-        LAYER_ORDER.indexOf(a.node_type) - LAYER_ORDER.indexOf(b.node_type) ||
-        a.label.localeCompare(b.label),
-    ),
-  );
+  orphans.forEach((id, i) => {
+    const a = (i / Math.max(orphans.length, 1)) * Math.PI * 2 - Math.PI / 2;
+    pos.set(id, { x: Math.cos(a) * (maxR + 300), y: Math.sin(a) * (maxR + 300) });
+  });
 
-  const X = 270;
-  const Y = 62;
-  const out: Node[] = [];
-  layers.forEach((layer, d) => {
-    layer.forEach((n, i) => {
-      out.push({
-        id: n.id,
-        type: "gnode",
-        position: { x: d * X, y: (i - (layer.length - 1) / 2) * Y },
-        data: { node: n, selected: false },
-      } satisfies Node);
-    });
-  });
-  return out;
+  return nodes.map((n) => ({
+    id: n.id,
+    type: "gnode",
+    position: pos.get(n.id) ?? { x: 0, y: 0 },
+    data: { node: n, selected: false },
+  }) satisfies Node);
 }
 
 function GraphControls({ selectedId }: { selectedId: string | null }) {
@@ -226,8 +265,11 @@ export function GraphView({ projectId }: { projectId?: string }) {
         source: e.source,
         target: e.target,
         label: e.relationship === "belongs_to" ? undefined : e.relationship,
-        style: { stroke: "#3a4049", strokeWidth: 1.2 },
-        labelStyle: { fill: "#6b7280", fontSize: 9, fontFamily: "var(--font)" },
+        style:
+          e.relationship === "belongs_to"
+            ? { stroke: "#4b5261", strokeWidth: 1.5 }
+            : { stroke: "rgba(55,148,255,0.55)", strokeWidth: 1.5 },
+        labelStyle: { fill: "#9da5b4", fontSize: 9, fontFamily: "var(--font)" },
       })),
     [visibleEdgePairs],
   );
