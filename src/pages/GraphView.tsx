@@ -50,9 +50,9 @@ const nodeTypes = { gnode: GNode };
 const LAYER_ORDER = ["project", "memory", "rule", "skill", "personal"];
 
 /**
- * Radial tree layout (Obsidian-style): roots at the center, children fanned
- * out on concentric rings with angle proportional to subtree size.
- * Deterministic, no simulation, draggable afterwards.
+ * Compact tidy tree: BFS from the roots, one column per depth, parents
+ * vertically centered over their children, disconnected nodes in a grid
+ * band below. Small enough that edges stay at readable zoom.
  */
 function layoutTree(
   nodes: GraphNode[],
@@ -78,11 +78,13 @@ function layoutTree(
     if (roots.length === 0 && nodes[0]) roots.push(nodes[0].id);
   }
 
-  // BFS: parent + depth, children in stable type/label order.
+  // BFS: parent, depth, children in stable type/label order.
   const parent = new Map<string, string | null>();
+  const depth = new Map<string, number>();
   const queue: string[] = [];
   roots.forEach((r) => {
     parent.set(r, null);
+    depth.set(r, 0);
     queue.push(r);
   });
   while (queue.length > 0) {
@@ -98,6 +100,7 @@ function layoutTree(
     });
     for (const nb of kids) {
       parent.set(nb, cur);
+      depth.set(nb, depth.get(cur)! + 1);
       queue.push(nb);
     }
   }
@@ -109,64 +112,53 @@ function layoutTree(
       children.get(p)!.push(id);
     }
   });
-  const orphans = nodes.filter((n) => !parent.has(n.id)).map((n) => n.id);
+  const orphans = nodes
+    .filter((n) => !parent.has(n.id))
+    .sort(
+      (a, b) =>
+        LAYER_ORDER.indexOf(a.node_type) - LAYER_ORDER.indexOf(b.node_type) ||
+        a.label.localeCompare(b.label),
+    );
 
-  const leaves = new Map<string, number>();
-  const countLeaves = (id: string): number => {
+  // Post-order Y: leaves take sequential slots, parents center on children.
+  const Y_GAP = 62;
+  const yOf = new Map<string, number>();
+  let cursor = 0;
+  const assignY = (id: string) => {
     const kids = children.get(id) ?? [];
     if (kids.length === 0) {
-      leaves.set(id, 1);
-      return 1;
+      yOf.set(id, cursor * Y_GAP);
+      cursor += 1;
+      return;
     }
-    const s = kids.reduce((a, k) => a + countLeaves(k), 0);
-    leaves.set(id, s);
-    return s;
-  };
-  roots.forEach(countLeaves);
-
-  const RING = 380;
-  const pos = new Map<string, { x: number; y: number }>();
-  if (roots.length === 1) {
-    pos.set(roots[0], { x: 0, y: 0 });
-  } else {
-    roots.forEach((r, i) => {
-      const a = (i / roots.length) * Math.PI * 2 - Math.PI / 2;
-      pos.set(r, { x: Math.cos(a) * RING * 0.6, y: Math.sin(a) * RING * 0.6 });
-    });
-  }
-
-  const place = (id: string, a0: number, a1: number, radius: number) => {
-    const kids = children.get(id) ?? [];
-    if (kids.length === 0) return;
-    const total = kids.reduce((s, k) => s + (leaves.get(k) ?? 1), 0);
-    let a = a0;
-    for (const k of kids) {
-      const w = ((leaves.get(k) ?? 1) / total) * (a1 - a0);
-      const mid = a + w / 2;
-      pos.set(k, { x: Math.cos(mid) * radius, y: Math.sin(mid) * radius });
-      place(k, a, a + w, radius + 320);
-      a += w;
-    }
+    kids.forEach(assignY);
+    const ys = kids.map((k) => yOf.get(k)!);
+    yOf.set(id, (Math.min(...ys) + Math.max(...ys)) / 2);
   };
   roots.forEach((r, i) => {
-    if (roots.length === 1) {
-      place(r, -Math.PI, Math.PI, RING);
-    } else {
-      const span = (Math.PI * 2) / roots.length;
-      const c = (i / roots.length) * Math.PI * 2 - Math.PI / 2;
-      place(r, c - span / 2, c + span / 2, RING);
-    }
+    if (i > 0) cursor += 1; // breathing room between trees
+    assignY(r);
   });
 
-  // Disconnected nodes: outer ring instead of random drift.
-  let maxR = RING;
-  pos.forEach((p) => {
-    maxR = Math.max(maxR, Math.hypot(p.x, p.y));
+  const X_STEP = 290;
+  const pos = new Map<string, { x: number; y: number }>();
+  const treeH = cursor * Y_GAP;
+  parent.forEach((_, id) => {
+    pos.set(id, { x: (depth.get(id) ?? 0) * X_STEP, y: (yOf.get(id) ?? 0) - treeH / 2 });
   });
-  orphans.forEach((id, i) => {
-    const a = (i / Math.max(orphans.length, 1)) * Math.PI * 2 - Math.PI / 2;
-    pos.set(id, { x: Math.cos(a) * (maxR + 300), y: Math.sin(a) * (maxR + 300) });
-  });
+
+  // Orphans: compact grid band under the trees.
+  if (orphans.length > 0) {
+    const cols = Math.min(orphans.length, 4);
+    orphans.forEach((n, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      pos.set(n.id, {
+        x: col * 230,
+        y: treeH / 2 + 50 + row * Y_GAP,
+      });
+    });
+  }
 
   return nodes.map((n) => ({
     id: n.id,
@@ -267,8 +259,8 @@ export function GraphView({ projectId }: { projectId?: string }) {
         label: e.relationship === "belongs_to" ? undefined : e.relationship,
         style:
           e.relationship === "belongs_to"
-            ? { stroke: "#4b5261", strokeWidth: 1.5 }
-            : { stroke: "rgba(55,148,255,0.55)", strokeWidth: 1.5 },
+            ? { stroke: "#5b6474", strokeWidth: 2 }
+            : { stroke: "rgba(55,148,255,0.65)", strokeWidth: 2 },
         labelStyle: { fill: "#9da5b4", fontSize: 9, fontFamily: "var(--font)" },
       })),
     [visibleEdgePairs],
