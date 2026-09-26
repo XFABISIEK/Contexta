@@ -1,0 +1,18 @@
+# dependencies
+node_modules/
+
+# builds
+dist/
+src-tauri/target/
+src-tauri/WixTools/
+
+# local databases / backups
+*.db
+*.db-shm
+*.db-wal
+
+# logs / editor
+*.log
+.vscode/
+.idea/
+.DS_Store
