@@ -52,6 +52,13 @@ Output (Windows): `src-tauri/target/release/bundle/` — NSIS `.exe` installer,
 MSI package and the standalone binary. The production bundle serves the UI from
 embedded assets; it does **not** depend on localhost or any external server.
 
+Icons (`src-tauri/icons/`) are generated, not hand-drawn — regenerate anytime with:
+
+```bash
+pip install pillow
+python scripts/gen-icons.py
+```
+
 ## Database
 
 - Location: `%APPDATA%/com.simplememory.app/simplememory.db` (WAL mode)
