@@ -160,7 +160,7 @@ button, input, select, textarea { font-family: var(--font); font-size: 13px; col
   border-radius: var(--radius); padding: 7px 13px; font-size: 12.5px; font-weight: 500;
   cursor: pointer; white-space: nowrap;
 }
-.btn svg { width: 14px; height: 14px; }
+.btn svg { width: 14px; height: 14px; flex-shrink: 0; }
 .btn:hover { background: var(--panel-hover); border-color: #3a4049; }
 .btn.primary { background: #0e639c; border-color: #0e639c; color: #fff; }
 .btn.primary:hover { background: #1177bb; }
@@ -244,7 +244,7 @@ button, input, select, textarea { font-family: var(--font); font-size: 13px; col
   border: 1px dashed var(--border); border-radius: var(--radius);
   padding: 34px 20px; text-align: center; color: var(--text-secondary);
 }
-.empty svg { width: 26px; height: 26px; color: var(--text-muted); margin-bottom: 10px; }
+.empty > svg { width: 26px; height: 26px; color: var(--text-muted); margin-bottom: 10px; }
 .empty h3 { margin: 0 0 4px; font-size: 13.5px; color: var(--text-primary); }
 .empty p { margin: 0 0 14px; font-size: 12px; }
 .empty-action { display: flex; justify-content: center; }
@@ -363,10 +363,10 @@ select.input { width: auto; }
   padding: 9px 13px; font-size: 12.5px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   max-width: 360px;
 }
-.toast svg { width: 14px; height: 14px; flex-shrink: 0; }
-.toast.success svg { color: var(--success); }
-.toast.error svg { color: var(--danger); }
-.toast.info svg { color: var(--accent); }
+.toast > svg { width: 14px; height: 14px; flex-shrink: 0; }
+.toast.success > svg { color: var(--success); }
+.toast.error > svg { color: var(--danger); }
+.toast.info > svg { color: var(--accent); }
 
 .kbd {
   font-size: 10.5px; color: var(--text-muted); border: 1px solid var(--border);
