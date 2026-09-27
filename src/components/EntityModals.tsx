@@ -4,6 +4,7 @@ import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import { debounce, MEMORY_TYPES, PRIORITIES } from "../lib/utils";
 import { Modal } from "./Modal";
+import { Select } from "./Select";
 import { SkillIcon } from "./SkillIcon";
 import type { ComposerState, Memory, Project } from "../types";
 
@@ -241,30 +242,32 @@ function MemoryModal({ composer, onDone }: { composer: ComposerState; onDone: ()
       <div className="field-row">
         <div className="field">
           <label>Project</label>
-          <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-            <option value="none">— none —</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+          <Select
+            label="Project"
+            value={projectId}
+            onChange={setProjectId}
+            options={[{ value: "none", label: "— none —" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+          />
         </div>
         <div className="field">
           <label>Type</label>
-          <select className="input" value={memoryType} onChange={(e) => setMemoryType(e.target.value)}>
-            {MEMORY_TYPES.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
+          <Select
+            label="Type"
+            value={memoryType}
+            onChange={setMemoryType}
+            options={MEMORY_TYPES.map((t) => ({ value: t, label: t }))}
+          />
         </div>
       </div>
       <div className="field-row">
         <div className="field">
           <label>Priority</label>
-          <select className="input" value={priority} onChange={(e) => setPriority(e.target.value)}>
-            {PRIORITIES.map((p) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
+          <Select
+            label="Priority"
+            value={priority}
+            onChange={setPriority}
+            options={PRIORITIES.map((p) => ({ value: p, label: p }))}
+          />
         </div>
         <div className="field">
           <label>Source</label>
@@ -357,20 +360,21 @@ function RuleModal({ composer, onDone }: { composer: ComposerState; onDone: () =
       <div className="field-row">
         <div className="field">
           <label>Project</label>
-          <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-            <option value="none">— global —</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+          <Select
+            label="Project"
+            value={projectId}
+            onChange={setProjectId}
+            options={[{ value: "none", label: "— global —" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+          />
         </div>
         <div className="field">
           <label>Priority</label>
-          <select className="input" value={priority} onChange={(e) => setPriority(e.target.value)}>
-            {PRIORITIES.map((p) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
+          <Select
+            label="Priority"
+            value={priority}
+            onChange={setPriority}
+            options={PRIORITIES.map((p) => ({ value: p, label: p }))}
+          />
         </div>
       </div>
       <label className="check">

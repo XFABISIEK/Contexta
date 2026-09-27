@@ -14,8 +14,8 @@
     {
       "identifier": "opener:allow-open-url",
       "allow": [
-        { "url": "https://github.com/XFABISIEK/SimpleMemory" },
-        { "url": "https://github.com/XFABISIEK/SimpleMemory/releases" }
+        { "url": "https://github.com/XFABISIEK/Contexa" },
+        { "url": "https://github.com/XFABISIEK/Contexa/releases" }
       ]
     }
   ]

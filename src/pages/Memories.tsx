@@ -4,6 +4,7 @@ import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import { debounce, timeAgo, truncate } from "../lib/utils";
 import { EmptyState } from "../components/Modal";
+import { Select } from "../components/Select";
 import type { Memory, Project } from "../types";
 
 const PAGE_SIZE = 30;
@@ -96,24 +97,24 @@ export function Memories() {
           <Search />
           <input value={query} onChange={(e) => onQuery(e.target.value)} placeholder="Search memories..." aria-label="Search memories" />
         </div>
-        <select className="input" value={projectId} onChange={(e) => { setProjectId(e.target.value); setOffset(0); }} aria-label="Project filter">
-          <option value="all">All projects</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-        <select className="input" value={memoryType} onChange={(e) => { setMemoryType(e.target.value); setOffset(0); }} aria-label="Type filter">
-          <option value="all">All types</option>
-          {["fact", "decision", "note", "reference", "todo"].map((t) => (
-            <option key={t} value={t}>{t}</option>
-          ))}
-        </select>
-        <select className="input" value={priority} onChange={(e) => { setPriority(e.target.value); setOffset(0); }} aria-label="Priority filter">
-          <option value="all">All priorities</option>
-          {["critical", "high", "normal", "low"].map((p) => (
-            <option key={p} value={p}>{p}</option>
-          ))}
-        </select>
+        <Select
+          label="Project filter"
+          value={projectId}
+          onChange={(v) => { setProjectId(v); setOffset(0); }}
+          options={[{ value: "all", label: "All projects" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+        />
+        <Select
+          label="Type filter"
+          value={memoryType}
+          onChange={(v) => { setMemoryType(v); setOffset(0); }}
+          options={[{ value: "all", label: "All types" }, ...["fact", "decision", "note", "reference", "todo"].map((t) => ({ value: t, label: t }))]}
+        />
+        <Select
+          label="Priority filter"
+          value={priority}
+          onChange={(v) => { setPriority(v); setOffset(0); }}
+          options={[{ value: "all", label: "All priorities" }, ...["critical", "high", "normal", "low"].map((p) => ({ value: p, label: p }))]}
+        />
         <button className="btn primary" onClick={() => setComposer({ kind: "memory" })}>
           <Plus /> New
         </button>

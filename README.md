@@ -1,6 +1,12 @@
-# Contexta
+<p align="center">
+  <img src="src-tauri/icons/128x128.png" alt="Contexta icon" width="96" />
+</p>
 
-**Central Memory Layer for AI** — a fast, local, desktop knowledge base for AI agents.
+<h1 align="center">Contexta</h1>
+
+<p align="center">
+  <strong>Central Memory Layer for AI</strong> — a fast, local, desktop knowledge base for AI agents.
+</p>
 
 Native desktop app (Tauri 2) · React + TypeScript UI · Rust backend · SQLite + FTS5 ·
 hybrid search (FTS today, vector-ready) · relation graph · project context builder.
@@ -12,6 +18,30 @@ native Tauri window (no browser, no localhost in production)
       ↓
 React UI  →  Tauri IPC  →  Rust services  →  SQLite (WAL)
 ```
+
+## Features
+
+- **Dashboard** — hero search, live statistics, recent memories, modified projects, quick actions
+- **Projects** — overview, memories, rules, linked skills and a scoped graph per project
+- **Memories / Rules / Skills / Personal** — full CRUD, priorities (`critical` always reach AI context), tags, FTS search, pagination
+- **Graph** — force-directed relation view (drag, pan, zoom, fit/center, type filters, neighbor highlight, details panel)
+- **Global search** (`Ctrl+Shift+F`) — SQLite FTS5 grouped by entity type
+- **Command palette** (`Ctrl+K`) — navigation + creation shortcuts
+- **AI integration** — 12 AI providers with brand icons, project context preview (JSON + Markdown), copyable MCP tool spec
+- **MCP server** — standalone `simplememory-mcp` stdio binary with 25 read/write tools
+- **Local-first** — SQLite (WAL), portable storage location, `VACUUM INTO` backups, JSON export/import
+- **Auto-updates** — signed NSIS bundles checked on demand from GitHub releases
+
+## Tech stack
+
+| Layer    | Technology                                              |
+| -------- | ------------------------------------------------------- |
+| Desktop  | Tauri 2 (custom titlebar, updater, dialog, opener)      |
+| Frontend | React 18, TypeScript, Vite, Zustand, Zod, Framer Motion |
+| Graph    | React Flow + d3-force                                   |
+| Backend  | Rust (services → repositories → SQLite)                 |
+| Database | SQLite (WAL) + FTS5 (`porter unicode61`)                |
+| Tests    | `cargo test`, `node --test`, `tsc --noEmit`             |
 
 ## Requirements
 
@@ -41,6 +71,7 @@ automatically with demo projects (`Contexta`, `Axiom`), rules, memories and skil
 | `npm run build`       | Type-check + bundle the frontend to `dist/` |
 | `npm run tauri build` | Produce signed updater bundles when `TAURI_SIGNING_PRIVATE_KEY` is set |
 | `cargo check` / `cargo test` (in `src-tauri/`) | Check / test the Rust backend |
+| `node --test src/lib/graph-layout.test.mjs` | Run the frontend graph-layout test |
 
 ## Build
 
@@ -56,7 +87,7 @@ embedded assets; it does **not** depend on localhost.
 
 ## Updates
 
-The Windows app checks `https://github.com/XFABISIEK/SimpleMemory/releases/latest/download/latest.json`
+The Windows app checks `https://github.com/XFABISIEK/Contexa/releases/latest/download/latest.json`
 only when the user clicks **Check for updates** in Settings. Tauri verifies the signed NSIS
 installer before installing it. The first published release establishes the update feed.
 
@@ -125,6 +156,17 @@ cargo build --release --bin simplememory-mcp
 Point any MCP client (Claude Desktop, Cursor, …) at the exe, optionally with
 `SIMPLEMEMORY_DB` pointing at the app database. Without it, the MCP binary reads
 the selected storage location from `storage.json` (or uses the default path).
+
+```json
+{
+  "mcpServers": {
+    "simplememory": {
+      "command": "<path-to>\\simplememory-mcp.exe",
+      "env": { "SIMPLEMEMORY_DB": "<appdata>\\com.simplememory.app\\simplememory.db" }
+    }
+  }
+}
+```
 
 The bundled Ponytail skill icon is licensed under MIT; its notice is in
 `src/assets/skills/LICENSE.ponytail` and in the app's Information page.

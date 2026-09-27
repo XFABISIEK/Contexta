@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
+import { getVersion } from "@tauri-apps/api/app";
 import { Database, Copy, Download, Upload, Cpu, Plug } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import { AIProviderPicker } from "../components/AIProviderPicker";
+import { Select } from "../components/Select";
+import { UpdateModal } from "../components/UpdateModal";
 import { downloadText, readFileText } from "../lib/utils";
 import type { DbInfo, Project } from "../types";
 
@@ -60,7 +63,11 @@ export function Settings() {
   const [ctxLoading, setCtxLoading] = useState(false);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [updateStatus, setUpdateStatus] = useState("Updates are checked only when you request them.");
-  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
+  const [dlProgress, setDlProgress] = useState<number | null>(null);
+  const [dlDone, setDlDone] = useState(false);
+  const [dlError, setDlError] = useState("");
+  const [curVersion, setCurVersion] = useState("");
   const updateRef = useRef<Update | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -68,6 +75,7 @@ export function Settings() {
 
   useEffect(() => {
     api.dbInfo().then(setDbInfo).catch(() => {});
+    getVersion().then(setCurVersion).catch(() => {});
     api.projects.list(undefined, 200, 0).then((p) => {
       setProjects(p.items);
       if (p.items[0]) setCtxProject((cur) => cur || p.items[0].name);
@@ -98,32 +106,42 @@ export function Settings() {
       updateRef.current = null;
       await previous?.close().catch(() => {});
       updateRef.current = await check();
-      setUpdateVersion(updateRef.current?.version ?? null);
-      setUpdateStatus(updateRef.current ? `Version ${updateRef.current.version} is available.` : "You have the latest version.");
+      if (updateRef.current) {
+        setPendingUpdate(updateRef.current);
+        setDlProgress(null);
+        setDlDone(false);
+        setDlError("");
+        setUpdateStatus(`Version ${updateRef.current.version} is available.`);
+      } else {
+        setUpdateStatus("You have the latest version.");
+        toast("success", "You have the latest version");
+      }
     } catch (e) {
-      setUpdateVersion(null);
       const message = e instanceof Error ? e.message : String(e);
       setUpdateStatus(message.includes("404") ? "No release has been published yet." : message);
+      toast("error", message.includes("404") ? "No release published yet" : message);
     } finally {
       setUpdateBusy(false);
     }
   };
 
-  const installUpdate = async () => {
+  const downloadUpdate = async () => {
     if (!updateRef.current) return;
     setUpdateBusy(true);
+    setDlError("");
     let downloaded = 0;
     let total = 0;
     try {
       await updateRef.current.downloadAndInstall((event) => {
         if (event.event === "Started") total = event.data.contentLength ?? 0;
         if (event.event === "Progress") downloaded += event.data.chunkLength;
-        setUpdateStatus(event.event === "Finished" ? "Installing update…" : total ? `Downloading update: ${Math.round(downloaded / total * 100)}%` : "Downloading update…");
+        setDlProgress(total ? Math.round((downloaded / total) * 100) : null);
       });
+      setDlDone(true);
+      setDlProgress(100);
       setUpdateStatus("Update installed. Restart Contexta.");
-      setUpdateVersion(null);
     } catch (e) {
-      setUpdateStatus(e instanceof Error ? e.message : "Update failed.");
+      setDlError(e instanceof Error ? e.message : "Update failed.");
     } finally {
       setUpdateBusy(false);
     }
@@ -236,11 +254,24 @@ export function Settings() {
         <div className="card">
           <div className="toolbar" style={{ alignItems: "center", marginBottom: 4 }}>
             <button className="btn sm" onClick={checkUpdate} disabled={updateBusy}>Check for updates</button>
-            {updateVersion && <button className="btn primary sm" onClick={installUpdate} disabled={updateBusy}><Download size={14} /> Download and install {updateVersion}</button>}
           </div>
           <div className="mono-dim" role="status">{updateStatus}</div>
         </div>
       </div>
+      <UpdateModal
+        open={pendingUpdate !== null}
+        currentVersion={curVersion}
+        newVersion={pendingUpdate?.version ?? ""}
+        notes={(pendingUpdate?.body ?? "").slice(0, 1200)}
+        busy={updateBusy}
+        progress={dlProgress}
+        done={dlDone}
+        error={dlError}
+        onDownload={downloadUpdate}
+        onClose={() => {
+          if (!updateBusy) setPendingUpdate(null);
+        }}
+      />
 
       <div className="section">
         <div className="section-head"><span className="section-title">Database</span></div>
@@ -274,11 +305,12 @@ export function Settings() {
         <div className="section-head"><span className="section-title">AI Integration — context preview</span></div>
         <div className="card">
           <div className="toolbar">
-            <select className="input" value={ctxProject} onChange={(e) => setCtxProject(e.target.value)} aria-label="Context project">
-              {projects.map((p) => (
-                <option key={p.id} value={p.name}>{p.name}</option>
-              ))}
-            </select>
+            <Select
+              label="Context project"
+              value={ctxProject}
+              onChange={setCtxProject}
+              options={projects.map((p) => ({ value: p.name, label: p.name }))}
+            />
             <div className="search-input" style={{ minWidth: 220 }}>
               <Cpu size={14} />
               <input value={ctxQuery} onChange={(e) => setCtxQuery(e.target.value)} placeholder="Query, e.g. how to implement auth?" aria-label="Context query" />

@@ -16,6 +16,7 @@ import "@xyflow/react/dist/style.css";
 import { Maximize, Crosshair, Search, Pencil, ExternalLink, ZoomIn, ZoomOut } from "lucide-react";
 import { AIIcon, aiProfile } from "../components/AIProviderPicker";
 import { skillIconSource } from "../components/SkillIcon";
+import { Select } from "../components/Select";
 import { AI_NODE_ID, layoutGraph } from "../lib/graph-layout";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
@@ -275,11 +276,16 @@ export function GraphView({ projectId }: { projectId?: string }) {
                 {t}
               </label>
             ))}
-            <select className="input" value={limit} onChange={(e) => setLimit(Number(e.target.value))} aria-label="Node limit">
-              <option value={100}>100 nodes</option>
-              <option value={300}>300 nodes</option>
-              <option value={600}>600 nodes</option>
-            </select>
+            <Select
+              label="Node limit"
+              value={String(limit)}
+              onChange={(v) => setLimit(Number(v))}
+              options={[
+                { value: "100", label: "100 nodes" },
+                { value: "300", label: "300 nodes" },
+                { value: "600", label: "600 nodes" },
+              ]}
+            />
           </>
         )}
         <span className="mono-dim">{visible.length} nodes · {visibleEdgePairs.length} edges</span>

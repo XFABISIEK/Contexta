@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { api } from "../lib/tauri";
+import { cx } from "../lib/utils";
 import openai from "../assets/ai/openai.svg";
 import claude from "../assets/ai/claude.svg";
 import gemini from "../assets/ai/gemini.svg";
@@ -41,7 +42,13 @@ export function aiProfile(value: string) {
 export function AIIcon({ provider }: { provider: string }) {
   const profile = aiProfile(provider);
   return profile.icon ? (
-    <img className="ai-mark" src={profile.icon} alt="" aria-hidden="true" draggable={false} />
+    <img
+      className={cx("ai-mark", provider === "kimi" && "invert")}
+      src={profile.icon}
+      alt=""
+      aria-hidden="true"
+      draggable={false}
+    />
   ) : (
     <span className="ai-monogram" aria-hidden="true">{profile.label.charAt(0).toUpperCase()}</span>
   );

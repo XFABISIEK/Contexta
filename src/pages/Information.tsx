@@ -9,7 +9,7 @@ import appIcon from "../../src-tauri/icons/128x128.png";
 import ponytailLicense from "../assets/skills/LICENSE.ponytail?raw";
 import type { DbInfo } from "../types";
 
-const REPOSITORY = "https://github.com/XFABISIEK/SimpleMemory";
+const REPOSITORY = "https://github.com/XFABISIEK/Contexa";
 
 export function Information() {
   const toast = useApp((s) => s.toast);

@@ -15,6 +15,7 @@ import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import { cx, timeAgo, truncate } from "../lib/utils";
 import { EmptyState } from "../components/Modal";
+import { Select } from "../components/Select";
 import type { Connection, Memory, Project, Rule, Skill } from "../types";
 import { SkillIcon } from "../components/SkillIcon";
 
@@ -295,12 +296,12 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }) {
           <div className="section">
             <div className="section-head"><span className="section-title">Connected skills</span></div>
             <div className="toolbar">
-              <select className="input" value={linkId} onChange={(e) => setLinkId(e.target.value)} aria-label="Skill to link">
-                <option value="">Link a skill…</option>
-                {allSkills.filter((s) => !linkedSkills.some((l) => l.id === s.id)).map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
+              <Select
+                label="Skill to link"
+                value={linkId}
+                onChange={setLinkId}
+                options={[{ value: "", label: "Link a skill…" }, ...allSkills.filter((s) => !linkedSkills.some((l) => l.id === s.id)).map((s) => ({ value: s.id, label: s.name }))]}
+              />
               <button className="btn sm" onClick={linkSkill} disabled={!linkId}>
                 <Link2 /> Link
               </button>

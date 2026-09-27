@@ -4,6 +4,7 @@ import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import { timeAgo, truncate } from "../lib/utils";
 import { EmptyState } from "../components/Modal";
+import { Select } from "../components/Select";
 import type { Project, Rule } from "../types";
 
 export function Rules() {
@@ -73,12 +74,12 @@ export function Rules() {
         <div className="sub">Critical rules are always included in AI project context.</div>
       </div>
       <div className="toolbar">
-        <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label="Project filter">
-          <option value="all">All projects + global</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
+        <Select
+          label="Project filter"
+          value={projectId}
+          onChange={setProjectId}
+          options={[{ value: "all", label: "All projects + global" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+        />
         <button className="btn primary" onClick={() => setComposer({ kind: "rule", projectId: projectId === "all" ? null : projectId })}>
           <Plus /> New Rule
         </button>
