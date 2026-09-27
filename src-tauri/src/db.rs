@@ -180,7 +180,9 @@ CREATE INDEX IF NOT EXISTS idx_embeddings_entity ON embeddings(entity_id, entity
 CREATE INDEX IF NOT EXISTS idx_memory_tags_tag ON memory_tags(tag_id);
 "#;
 
-const MIGRATIONS: [(i64, &str); 3] = [(1, MIGRATION_001), (2, MIGRATION_002), (3, MIGRATION_003)];
+const MIGRATION_004: &str = "ALTER TABLE skills ADD COLUMN icon TEXT NOT NULL DEFAULT '';";
+
+const MIGRATIONS: [(i64, &str); 4] = [(1, MIGRATION_001), (2, MIGRATION_002), (3, MIGRATION_003), (4, MIGRATION_004)];
 
 pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
     if let Some(parent) = path.parent() {
@@ -243,7 +245,7 @@ pub fn seed_dev_data(conn: &mut Connection) -> rusqlite::Result<String> {
     let ax_id = new_id();
     tx.execute(
         "INSERT INTO projects (id, name, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![sm_id, "SimpleMemory", "Local memory layer for AI agents. Tauri 2 + React + Rust + SQLite FTS5.", ts, ts],
+        params![sm_id, "Contexta", "Local memory layer for AI agents. Tauri 2 + React + Rust + SQLite FTS5.", ts, ts],
     )?;
     tx.execute(
         "INSERT INTO projects (id, name, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -350,7 +352,7 @@ mod tests {
         let v: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 3);
+        assert_eq!(v, 4);
     }
 
     #[test]
@@ -360,7 +362,7 @@ mod tests {
         let v: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 3);
+        assert_eq!(v, 4);
     }
 
     #[test]
@@ -373,6 +375,23 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))
             .unwrap();
         assert_eq!(projects, 2);
+    }
+
+    #[test]
+    fn skill_icons_survive_save_and_load() {
+        let conn = test_db();
+        let icon = "data:image/png;base64,AA==".to_string();
+        let skill = crate::repos::create_skill(&conn, crate::models::NewSkill {
+            name: "Ponytail".into(), description: None, content: None, category: None, icon: Some(icon.clone()),
+        }).unwrap();
+        assert_eq!(skill.icon, icon);
+        assert_eq!(crate::repos::get_skill(&conn, &skill.id).unwrap().unwrap().icon, icon);
+        assert_eq!(crate::repos::list_skills(&conn, None, None, None, None).unwrap().items[0].icon, icon);
+        let graph = crate::graph::get_graph(&conn, &crate::graph::GraphFilter { entity_types: None, project_id: None, limit: 300 }).unwrap();
+        assert_eq!(graph.nodes.iter().find(|node| node.id == skill.id).unwrap().icon.as_deref(), Some(icon.as_str()));
+        assert!(crate::repos::create_skill(&conn, crate::models::NewSkill {
+            name: "Invalid".into(), description: None, content: None, category: None, icon: Some("javascript:alert(1)".into()),
+        }).is_err());
     }
 
     #[test]

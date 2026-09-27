@@ -3,6 +3,12 @@ node_modules/
 
 # builds
 dist/
+.icon-build/
+/src-tauri/icons/*
+!/src-tauri/icons/32x32.png
+!/src-tauri/icons/128x128.png
+!/src-tauri/icons/icon.png
+!/src-tauri/icons/icon.ico
 src-tauri/target/
 src-tauri/WixTools/
 

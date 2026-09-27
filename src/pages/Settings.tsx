@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Database, Copy, Download, Upload, ShieldCheck, Cpu, Plug, Info } from "lucide-react";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { Database, Copy, Download, Upload, Cpu, Plug } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
+import { AIProviderPicker } from "../components/AIProviderPicker";
 import { downloadText, readFileText } from "../lib/utils";
 import type { DbInfo, Project } from "../types";
 
@@ -33,29 +35,36 @@ const MCP_TOOLS = [
   { name: "simplememory_unlink", description: "AI: remove a relation.", mapsTo: "delete_connection" },
 ];
 
-const MCP_CLIENT_CONFIG = `{
-  "mcpServers": {
-    "simplememory": {
-      "command": "<path-to>\\\\simplememory-mcp.exe",
-      "env": {
-        "SIMPLEMEMORY_DB": "<appdata>\\\\com.simplememory.app\\\\simplememory.db"
-      }
-    }
-  }
-}`;
+const mcpClientConfig = (path: string) => JSON.stringify({
+  mcpServers: {
+    simplememory: {
+      command: "<path-to>\\simplememory-mcp.exe",
+      env: { SIMPLEMEMORY_DB: path },
+    },
+  },
+}, null, 2);
 
 export function Settings() {
   const toast = useApp((s) => s.toast);
   const refreshStats = useApp((s) => s.refreshStats);
   const stats = useApp((s) => s.stats);
+  const aiProvider = useApp((s) => s.aiProvider);
+  const setAiProvider = useApp((s) => s.setAiProvider);
   const [dbInfo, setDbInfo] = useState<DbInfo | null>(null);
+  const clientConfig = mcpClientConfig(dbInfo?.path ?? "<database path>");
   const [density, setDensity] = useState("comfortable");
   const [projects, setProjects] = useState<Project[]>([]);
   const [ctxProject, setCtxProject] = useState("");
   const [ctxQuery, setCtxQuery] = useState("");
   const [ctxOut, setCtxOut] = useState<string | null>(null);
   const [ctxLoading, setCtxLoading] = useState(false);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState("Updates are checked only when you request them.");
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const updateRef = useRef<Update | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => () => { updateRef.current?.close().catch(() => {}); }, []);
 
   useEffect(() => {
     api.dbInfo().then(setDbInfo).catch(() => {});
@@ -81,6 +90,45 @@ export function Settings() {
     }
   };
 
+  const checkUpdate = async () => {
+    setUpdateBusy(true);
+    setUpdateStatus("Checking GitHub Releases…");
+    try {
+      const previous = updateRef.current;
+      updateRef.current = null;
+      await previous?.close().catch(() => {});
+      updateRef.current = await check();
+      setUpdateVersion(updateRef.current?.version ?? null);
+      setUpdateStatus(updateRef.current ? `Version ${updateRef.current.version} is available.` : "You have the latest version.");
+    } catch (e) {
+      setUpdateVersion(null);
+      const message = e instanceof Error ? e.message : String(e);
+      setUpdateStatus(message.includes("404") ? "No release has been published yet." : message);
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+
+  const installUpdate = async () => {
+    if (!updateRef.current) return;
+    setUpdateBusy(true);
+    let downloaded = 0;
+    let total = 0;
+    try {
+      await updateRef.current.downloadAndInstall((event) => {
+        if (event.event === "Started") total = event.data.contentLength ?? 0;
+        if (event.event === "Progress") downloaded += event.data.chunkLength;
+        setUpdateStatus(event.event === "Finished" ? "Installing update…" : total ? `Downloading update: ${Math.round(downloaded / total * 100)}%` : "Downloading update…");
+      });
+      setUpdateStatus("Update installed. Restart Contexta.");
+      setUpdateVersion(null);
+    } catch (e) {
+      setUpdateStatus(e instanceof Error ? e.message : "Update failed.");
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+
   const doBackup = async () => {
     try {
       const path = await api.backup();
@@ -94,7 +142,7 @@ export function Settings() {
   const doExport = async () => {
     try {
       const json = await api.exportDb();
-      downloadText(`simplememory-export-${Date.now()}.json`, json);
+      downloadText(`contexta-export-${Date.now()}.json`, json);
       toast("success", "Database exported");
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "Export failed");
@@ -158,19 +206,15 @@ export function Settings() {
   };
 
   return (
-    <div className="page">
+    <div className="page settings-page">
       <div className="page-head">
         <h1>Settings</h1>
-        <div className="sub">Local configuration. Nothing here phones home.</div>
+        <div className="sub">Choose your AI, adjust the interface and manage local data.</div>
       </div>
 
       <div className="section">
-        <div className="section-head"><span className="section-title">General</span></div>
-        <div className="card">
-          <div className="kv"><span className="k">Database</span><span className="mono-dim">{dbInfo?.path ?? "…"}</span></div>
-          <div className="kv"><span className="k">Size</span><span>{dbInfo ? `${(dbInfo.size_bytes / 1024).toFixed(1)} KB` : "…"}</span></div>
-          <div className="kv"><span className="k">Totals</span><span>{stats ? `${stats.projects} projects · ${stats.memories} memories · ${stats.rules} rules · ${stats.skills} skills` : "…"}</span></div>
-        </div>
+        <div className="section-head"><span className="section-title">AI provider</span></div>
+        <AIProviderPicker value={aiProvider ?? null} onSaved={setAiProvider} />
       </div>
 
       <div className="section">
@@ -183,31 +227,49 @@ export function Settings() {
               <button className={density === "comfortable" ? "active" : ""} onClick={() => setDensityPref("comfortable")}>Comfortable</button>
             </span>
           </div>
-          <div className="kv"><span className="k">Theme</span><span className="mono-dim">Dark (JetBrains Mono) — the only theme, by design.</span></div>
+          <div className="kv"><span className="k">Theme</span><span className="mono-dim">Dark</span></div>
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="section-head"><span className="section-title">Updates</span></div>
+        <div className="card">
+          <div className="toolbar" style={{ alignItems: "center", marginBottom: 4 }}>
+            <button className="btn sm" onClick={checkUpdate} disabled={updateBusy}>Check for updates</button>
+            {updateVersion && <button className="btn primary sm" onClick={installUpdate} disabled={updateBusy}><Download size={14} /> Download and install {updateVersion}</button>}
+          </div>
+          <div className="mono-dim" role="status">{updateStatus}</div>
         </div>
       </div>
 
       <div className="section">
         <div className="section-head"><span className="section-title">Database</span></div>
-        <div className="card" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button className="btn sm" onClick={doBackup}><Database size={14} /> Backup now</button>
-          <button className="btn sm" onClick={doExport}><Download size={14} /> Export database (JSON)</button>
-          <button className="btn sm" onClick={() => fileRef.current?.click()}><Upload size={14} /> Import project (JSON)</button>
-          <button className="btn sm ghost" onClick={doSeed}>Seed demo data</button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/json"
-            className="file-input"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) doImport(f);
-              e.target.value = "";
-            }}
-          />
+        <div className="card">
+          <div className="kv"><span className="k">Location</span><span className="mono-dim settings-path">{dbInfo?.path ?? "…"}</span></div>
+          <div className="kv"><span className="k">Size</span><span>{dbInfo ? `${(dbInfo.size_bytes / 1024).toFixed(1)} KB` : "…"}</span></div>
+          <div className="kv"><span className="k">Totals</span><span>{stats ? `${stats.projects} projects · ${stats.memories} memories · ${stats.rules} rules · ${stats.skills} skills` : "…"}</span></div>
+          <div className="settings-actions">
+            <button className="btn sm" onClick={doBackup}><Database size={14} /> Backup now</button>
+            <button className="btn sm" onClick={doExport}><Download size={14} /> Export database (JSON)</button>
+            <button className="btn sm" onClick={() => fileRef.current?.click()}><Upload size={14} /> Import project (JSON)</button>
+            <button className="btn sm ghost" onClick={doSeed}>Seed demo data</button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/json"
+              className="file-input"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) doImport(f);
+                e.target.value = "";
+              }}
+            />
+          </div>
         </div>
       </div>
 
+      <details className="settings-advanced">
+        <summary>Developer tools</summary>
       <div className="section">
         <div className="section-head"><span className="section-title">AI Integration — context preview</span></div>
         <div className="card">
@@ -237,7 +299,7 @@ export function Settings() {
             read <em>and</em> write. Build: <span className="code">cargo build --release --bin simplememory-mcp</span>,
             then point any MCP client at the exe. No HTTP server, no network.
           </p>
-          <div className="md-preview" style={{ marginBottom: 10 }}>{MCP_CLIENT_CONFIG}</div>
+          <div className="md-preview" style={{ marginBottom: 10 }}>{clientConfig}</div>
           <div className="list" style={{ marginBottom: 10 }}>
             {MCP_TOOLS.map((t) => (
               <div key={t.name} className="row" style={{ cursor: "default" }}>
@@ -255,7 +317,7 @@ export function Settings() {
               className="btn sm"
               onClick={async () => {
                 try {
-                  await navigator.clipboard.writeText(MCP_CLIENT_CONFIG);
+                  await navigator.clipboard.writeText(clientConfig);
                   toast("success", "Client config copied");
                 } catch {
                   toast("error", "Clipboard unavailable");
@@ -267,22 +329,7 @@ export function Settings() {
           </div>
         </div>
       </div>
-
-      <div className="section">
-        <div className="section-head"><span className="section-title">Privacy</span></div>
-        <div className="card">
-          <div className="kv"><span className="k"><ShieldCheck size={13} /></span><span>No cloud sync, no telemetry, no analytics, no external requests.</span></div>
-          <div className="kv"><span className="k">Storage</span><span className="mono-dim">Single SQLite file on this machine. Delete it and everything is gone.</span></div>
-          <div className="kv"><span className="k">Encryption</span><span className="mono-dim">At-rest encryption is on the roadmap (SQLCipher); schema is ready for it.</span></div>
-        </div>
-      </div>
-
-      <div className="section">
-        <div className="section-head"><span className="section-title">About</span></div>
-        <div className="card">
-          <div className="kv"><span className="k"><Info size={13} /></span><span>SimpleMemory 0.1.0 — Tauri 2 · React · Rust · SQLite FTS5</span></div>
-        </div>
-      </div>
+      </details>
     </div>
   );
 }

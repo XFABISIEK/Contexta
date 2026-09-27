@@ -48,7 +48,7 @@ pub fn get_graph(conn: &Connection, f: &GraphFilter) -> rusqlite::Result<GraphDa
                 continue;
             }
             ids.insert(id.clone());
-            nodes.push(GraphNode { id, node_type: "project".to_string(), label: name, project_id: None, priority: None });
+            nodes.push(GraphNode { id, node_type: "project".to_string(), label: name, project_id: None, priority: None, icon: None });
         }
     }
 
@@ -60,12 +60,12 @@ pub fn get_graph(conn: &Connection, f: &GraphFilter) -> rusqlite::Result<GraphDa
         if c > cap {
             truncated = true;
         }
-        let mut stmt = conn.prepare("SELECT id, name FROM skills ORDER BY updated_at DESC LIMIT ?1")?;
-        let rows = stmt.query_map(params![cap], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut stmt = conn.prepare("SELECT id, name, icon FROM skills ORDER BY updated_at DESC LIMIT ?1")?;
+        let rows = stmt.query_map(params![cap], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
         for r in rows {
-            let (id, name) = r?;
+            let (id, name, icon) = r?;
             ids.insert(id.clone());
-            nodes.push(GraphNode { id, node_type: "skill".to_string(), label: name, project_id: None, priority: None });
+            nodes.push(GraphNode { id, node_type: "skill".to_string(), label: name, project_id: None, priority: None, icon: Some(icon) });
         }
     }
 
@@ -82,7 +82,7 @@ pub fn get_graph(conn: &Connection, f: &GraphFilter) -> rusqlite::Result<GraphDa
         for r in rows {
             let (id, title) = r?;
             ids.insert(id.clone());
-            nodes.push(GraphNode { id, node_type: "personal".to_string(), label: title, project_id: None, priority: None });
+            nodes.push(GraphNode { id, node_type: "personal".to_string(), label: title, project_id: None, priority: None, icon: None });
         }
     }
 
@@ -109,7 +109,7 @@ pub fn get_graph(conn: &Connection, f: &GraphFilter) -> rusqlite::Result<GraphDa
         for r in rows {
             let (id, title, pid, prio) = r?;
             ids.insert(id.clone());
-            nodes.push(GraphNode { id, node_type: "memory".to_string(), label: title, project_id: pid, priority: Some(prio) });
+            nodes.push(GraphNode { id, node_type: "memory".to_string(), label: title, project_id: pid, priority: Some(prio), icon: None });
         }
     }
 
@@ -136,7 +136,7 @@ pub fn get_graph(conn: &Connection, f: &GraphFilter) -> rusqlite::Result<GraphDa
         for r in rows {
             let (id, title, pid, prio) = r?;
             ids.insert(id.clone());
-            nodes.push(GraphNode { id, node_type: "rule".to_string(), label: title, project_id: pid, priority: Some(prio) });
+            nodes.push(GraphNode { id, node_type: "rule".to_string(), label: title, project_id: pid, priority: Some(prio), icon: None });
         }
     }
 

@@ -6,6 +6,7 @@ import {
   ScrollText,
   Wrench,
   User,
+  Info,
   Settings,
 } from "lucide-react";
 import { useApp } from "../stores/app-store";
@@ -35,20 +36,31 @@ export function Sidebar() {
           className={cx("side-item", view === item.view && "active")}
           onClick={() => go(item.view)}
           title={item.label}
+          aria-label={item.label}
         >
           <item.icon />
-          {item.label}
+          <span className="side-text">{item.label}</span>
         </button>
       ))}
       <div className="side-spacer" />
       <div className="side-foot">
         <button
+          className={cx("side-item", view === "information" && "active")}
+          onClick={() => go("information")}
+          title="Information"
+          aria-label="Information"
+        >
+          <Info />
+          <span className="side-text">Information</span>
+        </button>
+        <button
           className={cx("side-item", view === "settings" && "active")}
           onClick={() => go("settings")}
           title="Settings"
+          aria-label="Settings"
         >
           <Settings />
-          Settings
+          <span className="side-text">Settings</span>
         </button>
       </div>
     </nav>

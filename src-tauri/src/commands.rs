@@ -9,7 +9,7 @@ use crate::models::{
     NewConnection, NewMemory, NewPersonalInfo, NewProject, NewRule, NewSkill, Paged,
     PersonalInfo, Project, ProjectContext, Rule, SearchResult, Skill, Tag, UpdateMemory,
 };
-use crate::{db_path, AppState};
+use crate::{db_path, default_db_path, storage, AppState};
 
 fn lock<'a>(state: &'a State<'_, AppState>) -> std::sync::MutexGuard<'a, rusqlite::Connection> {
     state.conn.lock().expect("database lock poisoned")
@@ -21,6 +21,27 @@ pub struct DbInfo {
     pub size_bytes: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct StorageSetup {
+    pub configured: bool,
+    pub default_path: String,
+}
+
+#[tauri::command]
+pub fn get_storage_setup(app: tauri::AppHandle) -> Result<StorageSetup, String> {
+    let default = default_db_path(&app);
+    Ok(StorageSetup {
+        configured: storage::configured_path(&default)?.is_some(),
+        default_path: default.to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
+pub fn complete_storage_setup(app: tauri::AppHandle, state: State<'_, AppState>, directory: Option<String>) -> Result<String, String> {
+    let path = storage::finish_setup(&mut lock(&state), &default_db_path(&app), directory.as_deref().map(std::path::Path::new))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 // ---------- dashboard ----------
 
 #[tauri::command]
@@ -30,7 +51,7 @@ pub fn get_dashboard_stats(state: State<'_, AppState>) -> Result<DashboardStats,
 
 #[tauri::command]
 pub fn get_db_info(app: tauri::AppHandle) -> Result<DbInfo, String> {
-    let path = db_path(&app);
+    let path = db_path(&app)?;
     let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     Ok(DbInfo { path: path.to_string_lossy().to_string(), size_bytes: size })
 }
@@ -290,7 +311,7 @@ pub fn import_project(state: State<'_, AppState>, json: String) -> Result<Import
 
 #[tauri::command]
 pub fn backup_database(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<String, String> {
-    let dir = crate::backup_dir(&app);
+    let dir = crate::backup_dir(&app)?;
     let name = format!("simplememory-{}.db", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
     let dest: PathBuf = dir.join(name);
     crate::repos::backup_db(&lock(&state), &dest)?;

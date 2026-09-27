@@ -494,14 +494,14 @@ pub fn list_skills(
         |r| r.get(0),
     )?;
     let mut stmt = conn.prepare(
-        "SELECT id, name, description, content, category, created_at, updated_at FROM skills \
+        "SELECT id, name, description, content, category, created_at, updated_at, icon FROM skills \
         WHERE (?1 IS NULL OR name LIKE ?1 OR description LIKE ?1) AND (?2 IS NULL OR category = ?2) \
         ORDER BY updated_at DESC LIMIT ?3 OFFSET ?4",
     )?;
     let rows = stmt.query_map(params![q, category, limit, offset], |r| {
         Ok(Skill {
             id: r.get(0)?, name: r.get(1)?, description: r.get(2)?, content: r.get(3)?,
-            category: r.get(4)?, created_at: r.get(5)?, updated_at: r.get(6)?,
+            category: r.get(4)?, created_at: r.get(5)?, updated_at: r.get(6)?, icon: r.get(7)?,
         })
     })?;
     Ok(Paged { items: rows.collect::<rusqlite::Result<_>>()?, total, limit, offset })
@@ -512,11 +512,12 @@ pub fn create_skill(conn: &Connection, input: NewSkill) -> Result<Skill, String>
     if name.is_empty() {
         return Err("Skill name must not be empty".to_string());
     }
+    validate_skill_icon(input.icon.as_deref())?;
     let ts = now_ts();
     let id = new_id();
     conn.execute(
-        "INSERT INTO skills (id, name, description, content, category, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![id, name, input.description.unwrap_or_default(), input.content.unwrap_or_default(), input.category.unwrap_or_else(|| "general".to_string()), ts, ts],
+        "INSERT INTO skills (id, name, description, content, category, created_at, updated_at, icon) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![id, name, input.description.unwrap_or_default(), input.content.unwrap_or_default(), input.category.unwrap_or_else(|| "general".to_string()), ts, ts, input.icon.unwrap_or_default()],
     )
     .map_err(|e| {
         if e.to_string().contains("UNIQUE") {
@@ -529,11 +530,11 @@ pub fn create_skill(conn: &Connection, input: NewSkill) -> Result<Skill, String>
 }
 
 pub fn get_skill(conn: &Connection, id: &str) -> rusqlite::Result<Option<Skill>> {
-    let mut stmt = conn.prepare("SELECT id, name, description, content, category, created_at, updated_at FROM skills WHERE id = ?1")?;
+    let mut stmt = conn.prepare("SELECT id, name, description, content, category, created_at, updated_at, icon FROM skills WHERE id = ?1")?;
     let mut rows = stmt.query_map(params![id], |r| {
         Ok(Skill {
             id: r.get(0)?, name: r.get(1)?, description: r.get(2)?, content: r.get(3)?,
-            category: r.get(4)?, created_at: r.get(5)?, updated_at: r.get(6)?,
+            category: r.get(4)?, created_at: r.get(5)?, updated_at: r.get(6)?, icon: r.get(7)?,
         })
     })?;
     match rows.next() {
@@ -546,17 +547,29 @@ pub fn update_skill(conn: &Connection, id: &str, input: NewSkill) -> Result<Skil
     if input.name.trim().is_empty() {
         return Err("Skill name must not be empty".to_string());
     }
+    validate_skill_icon(input.icon.as_deref())?;
     let ts = now_ts();
     let n = conn
         .execute(
-            "UPDATE skills SET name = ?1, description = ?2, content = ?3, category = ?4, updated_at = ?5 WHERE id = ?6",
-            params![input.name, input.description.unwrap_or_default(), input.content.unwrap_or_default(), input.category.unwrap_or_else(|| "general".to_string()), ts, id],
+            "UPDATE skills SET name = ?1, description = ?2, content = ?3, category = ?4, icon = COALESCE(?5, icon), updated_at = ?6 WHERE id = ?7",
+            params![input.name, input.description.unwrap_or_default(), input.content.unwrap_or_default(), input.category.unwrap_or_else(|| "general".to_string()), input.icon, ts, id],
         )
         .map_err(|e| e.to_string())?;
     if n == 0 {
         return Err("Skill not found".to_string());
     }
     get_skill(conn, id).map_err(|e| e.to_string())?.ok_or_else(|| "Skill not found".to_string())
+}
+
+fn validate_skill_icon(icon: Option<&str>) -> Result<(), String> {
+    let Some(icon) = icon else { return Ok(()); };
+    if icon.is_empty() { return Ok(()); }
+    let data = ["data:image/png;base64,", "data:image/jpeg;base64,", "data:image/webp;base64,"]
+        .iter().find_map(|prefix| icon.strip_prefix(prefix));
+    if icon.len() > 180_000 || data.map_or(true, |value| value.is_empty() || !value.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))) {
+        return Err("Skill icon must be a PNG, JPEG or WebP image smaller than 128 KB.".into());
+    }
+    Ok(())
 }
 
 pub fn delete_skill(conn: &Connection, id: &str) -> Result<(), String> {

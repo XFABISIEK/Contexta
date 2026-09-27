@@ -1,4 +1,4 @@
-# SimpleMemory
+# Contexta
 
 **Central Memory Layer for AI** — a fast, local, desktop knowledge base for AI agents.
 
@@ -6,7 +6,7 @@ Native desktop app (Tauri 2) · React + TypeScript UI · Rust backend · SQLite 
 hybrid search (FTS today, vector-ready) · relation graph · project context builder.
 
 ```
-SimpleMemory.exe
+contexta.exe
       ↓
 native Tauri window (no browser, no localhost in production)
       ↓
@@ -30,7 +30,7 @@ npm run tauri dev
 ```
 
 The app opens as a **native window**. In dev, an empty database is seeded
-automatically with demo projects (`SimpleMemory`, `Axiom`), rules, memories and skills.
+automatically with demo projects (`Contexta`, `Axiom`), rules, memories and skills.
 
 ## Commands
 
@@ -39,38 +39,54 @@ automatically with demo projects (`SimpleMemory`, `Axiom`), rules, memories and 
 | `npm install`         | Install frontend dependencies             |
 | `npm run tauri dev`   | Run the desktop app (dev)                 |
 | `npm run build`       | Type-check + bundle the frontend to `dist/` |
-| `npm run tauri build` | Produce `SimpleMemory.exe` / `.msi` (release) |
+| `npm run tauri build` | Produce signed updater bundles when `TAURI_SIGNING_PRIVATE_KEY` is set |
 | `cargo check` / `cargo test` (in `src-tauri/`) | Check / test the Rust backend |
 
 ## Build
 
-```bash
-npm run tauri build
+```powershell
+$env:TAURI_SIGNING_PRIVATE_KEY = "$env:USERPROFILE\.tauri\simplememory.key"
+npm run tauri -- build --bundles nsis
 ```
 
-Output (Windows): `src-tauri/target/release/bundle/` — NSIS `.exe` installer,
-MSI package and the standalone binary. The production bundle serves the UI from
-embedded assets; it does **not** depend on localhost or any external server.
+Output (Windows): `src-tauri/target/release/bundle/nsis/` — NSIS `.exe` installer
+and its updater signature. The standalone binary is `src-tauri/target/release/contexta.exe`.
+The production bundle serves the UI from
+embedded assets; it does **not** depend on localhost.
 
-Icons (`src-tauri/icons/`) are generated, not hand-drawn — regenerate anytime with:
+## Updates
+
+The Windows app checks `https://github.com/XFABISIEK/SimpleMemory/releases/latest/download/latest.json`
+only when the user clicks **Check for updates** in Settings. Tauri verifies the signed NSIS
+installer before installing it. The first published release establishes the update feed.
+
+The private signing key is at `%USERPROFILE%\.tauri\simplememory.key` on the build machine;
+back it up securely and never commit it. Set its **contents** as the repository secret
+`TAURI_SIGNING_PRIVATE_KEY`. The public key is already in `tauri.conf.json`. To publish,
+bump the matching versions in `package.json`, `src-tauri/Cargo.toml`, and
+`src-tauri/tauri.conf.json`, run the **Windows release** GitHub workflow, then review
+and publish its draft release. The workflow uploads the installer, signature, and `latest.json`.
+
+The app icon comes from `.Images/app-icon.png`. Generate the platform icons with:
 
 ```bash
-pip install pillow
-python scripts/gen-icons.py
+npm run tauri -- icon .Images/app-icon.png --output src-tauri/icons
 ```
 
 ## Database
 
 - Location: `%APPDATA%/com.simplememory.app/simplememory.db` (WAL mode)
+- On first launch, the user can choose a different folder. Contexta copies the existing SQLite database with `VACUUM INTO`, keeps the original, and stores the active path in `%APPDATA%/com.simplememory.app/storage.json`.
+- The internal app identifier and database path retain the original name so existing data remains accessible after the Contexta rename.
 - Migrations: `src-tauri/src/db.rs` (`001` schema + indexes, `002` FTS5 index +
-  sync triggers, `003` composite indexes), tracked in `_migrations`.
+  sync triggers, `003` composite indexes, `004` skill icons), tracked in `_migrations`.
 - Tables: `projects`, `memories`, `rules`, `skills`, `personal_information`,
   `tags`, `memory_tags`, `connections`, `embeddings` (vector-ready),
   `app_settings`.
 - Full-text search: external-content FTS5 table `search_index_fts`
   (`porter unicode61`), kept in sync by triggers on every write. Search always
   runs in SQLite/Rust — the app never loads whole tables into RAM.
-- Backups: `VACUUM INTO` timestamped copies in `<app-data>/backups`
+- Backups: `VACUUM INTO` timestamped copies beside the active database in `backups/`
   (Settings → Database). Export/import is JSON per database or per project.
 
 ## Architecture
@@ -107,8 +123,11 @@ cargo build --release --bin simplememory-mcp
 ```
 
 Point any MCP client (Claude Desktop, Cursor, …) at the exe, optionally with
-`SIMPLEMEMORY_DB` pointing at the app database (default:
-`%APPDATA%/com.simplememory.app/simplememory.db`).
+`SIMPLEMEMORY_DB` pointing at the app database. Without it, the MCP binary reads
+the selected storage location from `storage.json` (or uses the default path).
+
+The bundled Ponytail skill icon is licensed under MIT; its notice is in
+`src/assets/skills/LICENSE.ponytail` and in the app's Information page.
 
 Read tools (context retrieval):
 
@@ -167,6 +186,6 @@ SimpleMemory/
 
 ## Privacy
 
-Local-only by default: no cloud sync, no telemetry, no analytics, no external
-requests. Personal information stays in the local SQLite file; at-rest
+No cloud sync, telemetry, or analytics. The app contacts GitHub only when you
+check for updates. Personal information stays in the local SQLite file; at-rest
 encryption (SQLCipher) is planned and the schema is ready for it.

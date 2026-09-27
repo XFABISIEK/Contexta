@@ -4,6 +4,7 @@ import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import { debounce, timeAgo, truncate } from "../lib/utils";
 import { EmptyState } from "../components/Modal";
+import { SkillIcon } from "../components/SkillIcon";
 import type { Skill } from "../types";
 
 export function Skills() {
@@ -81,7 +82,7 @@ export function Skills() {
         <div className="list">
           {items.map((s) => (
             <div key={s.id} className="row" onClick={() => setComposer({ kind: "skill", editId: s.id })}>
-              <div className="row-icon"><Wrench /></div>
+              <div className="row-icon"><SkillIcon name={s.name} icon={s.icon} /></div>
               <div className="row-main">
                 <div className="row-title">{s.name}</div>
                 <div className="row-sub">{truncate(s.description, 120) || "—"}</div>

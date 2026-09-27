@@ -9,7 +9,7 @@ export function StatusBar() {
     <div className="statusbar">
       <span className="st-item">
         <span className={dbOk ? "st-dot" : "st-dot bad"} />
-        SimpleMemory
+        Contexta
       </span>
       <span className="st-item">
         <Database />

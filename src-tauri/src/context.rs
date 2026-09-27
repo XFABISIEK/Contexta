@@ -104,6 +104,7 @@ fn matching_skills(conn: &Connection, query: &str, limit: i64) -> rusqlite::Resu
                     category: r.get(4)?,
                     created_at: r.get(5)?,
                     updated_at: r.get(6)?,
+                    icon: String::new(),
                 })
             })?
             .collect();
@@ -144,6 +145,7 @@ fn matching_skills(conn: &Connection, query: &str, limit: i64) -> rusqlite::Resu
             category: r.get(4)?,
             created_at: r.get(5)?,
             updated_at: r.get(6)?,
+            icon: String::new(),
         })
     })?;
     rows.collect::<rusqlite::Result<Vec<Skill>>>()

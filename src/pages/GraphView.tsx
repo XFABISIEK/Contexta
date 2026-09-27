@@ -1,177 +1,66 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
-  Background,
   Handle,
   Position,
   useReactFlow,
+  useNodesInitialized,
   ReactFlowProvider,
-  MarkerType,
+  NodeToolbar,
+  useNodesState,
   type Node,
   type Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import {
-  Folder,
-  Brain,
-  ScrollText,
-  Wrench,
-  User,
-  Maximize,
-  Crosshair,
-  Search,
-  Pencil,
-  ExternalLink,
-} from "lucide-react";
+import { Maximize, Crosshair, Search, Pencil, ExternalLink } from "lucide-react";
+import { AIIcon, aiProfile } from "../components/AIProviderPicker";
+import { skillIconSource } from "../components/SkillIcon";
+import { AI_NODE_ID, layoutGraph } from "../lib/graph-layout";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import { cx, truncate } from "../lib/utils";
 import type { GraphData, GraphNode, Memory, Project, Rule, Skill, PersonalInfo } from "../types";
 
-const TYPE_ICON: Record<string, typeof Folder> = {
-  project: Folder,
-  memory: Brain,
-  rule: ScrollText,
-  skill: Wrench,
-  personal: User,
-};
-
 const ALL_TYPES = ["project", "memory", "rule", "skill", "personal"];
 
-function GNode({ data }: { data: { node: GraphNode; selected: boolean } }) {
-  const Icon = TYPE_ICON[data.node.node_type] ?? Brain;
+const anchorStyle = { top: "50%", left: "50%", width: 1, height: 1, border: 0, opacity: 0 };
+
+function Anchors() {
   return (
-    <div className={cx("gnode", `gnode-${data.node.node_type}`, data.selected && "selected")}>
-      <Handle type="source" position={Position.Left} style={{ opacity: 0 }} />
-      <Icon />
-      <span className="lbl" title={data.node.label}>{data.node.label}</span>
-      <Handle type="target" position={Position.Right} style={{ opacity: 0 }} />
+    <>
+      <Handle type="source" position={Position.Top} style={anchorStyle} />
+      <Handle type="target" position={Position.Top} style={anchorStyle} />
+    </>
+  );
+}
+
+function GNode({ data }: { data: { node: GraphNode; selected: boolean; hovered: boolean; dimmed: boolean; showLabel: boolean } }) {
+  const skillIcon = data.node.node_type === "skill" ? skillIconSource(data.node.label, data.node.icon) : null;
+  return (
+    <div className={cx("gnode", `gnode-${data.node.node_type}`, skillIcon && "has-icon", data.selected && "selected", data.dimmed && "dimmed")} title={data.node.label}>
+      <Anchors />
+      {skillIcon && <img className="gnode-icon" src={skillIcon} alt="" aria-hidden="true" draggable={false} />}
+      <NodeToolbar isVisible={data.showLabel || data.selected || data.hovered} position={Position.Bottom} offset={8}>
+        <span className="gnode-label">{data.node.label}</span>
+      </NodeToolbar>
     </div>
   );
 }
 
-const nodeTypes = { gnode: GNode };
-
-const LAYER_ORDER = ["project", "memory", "rule", "skill", "personal"];
-
-/**
- * Compact tidy tree: BFS from the roots, one column per depth, parents
- * vertically centered over their children, disconnected nodes in a grid
- * band below. Small enough that edges stay at readable zoom.
- */
-function layoutTree(
-  nodes: GraphNode[],
-  edges: Array<{ source: string; target: string }>,
-  rootId: string | null,
-): Node[] {
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  const adj = new Map<string, Set<string>>();
-  const link = (a: string, b: string) => {
-    if (!byId.has(a) || !byId.has(b) || a === b) return;
-    if (!adj.has(a)) adj.set(a, new Set());
-    if (!adj.has(b)) adj.set(b, new Set());
-    adj.get(a)!.add(b);
-    adj.get(b)!.add(a);
-  };
-  edges.forEach((e) => link(e.source, e.target));
-
-  const roots: string[] = [];
-  if (rootId && byId.has(rootId)) {
-    roots.push(rootId);
-  } else {
-    nodes.filter((n) => n.node_type === "project").forEach((n) => roots.push(n.id));
-    if (roots.length === 0 && nodes[0]) roots.push(nodes[0].id);
-  }
-
-  // BFS: parent, depth, children in stable type/label order.
-  const parent = new Map<string, string | null>();
-  const depth = new Map<string, number>();
-  const queue: string[] = [];
-  roots.forEach((r) => {
-    parent.set(r, null);
-    depth.set(r, 0);
-    queue.push(r);
-  });
-  while (queue.length > 0) {
-    const cur = queue.shift()!;
-    const kids = [...(adj.get(cur) ?? [])].filter((nb) => !parent.has(nb));
-    kids.sort((a, b) => {
-      const na = byId.get(a)!;
-      const nb = byId.get(b)!;
-      return (
-        LAYER_ORDER.indexOf(na.node_type) - LAYER_ORDER.indexOf(nb.node_type) ||
-        na.label.localeCompare(nb.label)
-      );
-    });
-    for (const nb of kids) {
-      parent.set(nb, cur);
-      depth.set(nb, depth.get(cur)! + 1);
-      queue.push(nb);
-    }
-  }
-
-  const children = new Map<string, string[]>();
-  parent.forEach((p, id) => {
-    if (p) {
-      if (!children.has(p)) children.set(p, []);
-      children.get(p)!.push(id);
-    }
-  });
-  const orphans = nodes
-    .filter((n) => !parent.has(n.id))
-    .sort(
-      (a, b) =>
-        LAYER_ORDER.indexOf(a.node_type) - LAYER_ORDER.indexOf(b.node_type) ||
-        a.label.localeCompare(b.label),
-    );
-
-  // Post-order Y: leaves take sequential slots, parents center on children.
-  const Y_GAP = 62;
-  const yOf = new Map<string, number>();
-  let cursor = 0;
-  const assignY = (id: string) => {
-    const kids = children.get(id) ?? [];
-    if (kids.length === 0) {
-      yOf.set(id, cursor * Y_GAP);
-      cursor += 1;
-      return;
-    }
-    kids.forEach(assignY);
-    const ys = kids.map((k) => yOf.get(k)!);
-    yOf.set(id, (Math.min(...ys) + Math.max(...ys)) / 2);
-  };
-  roots.forEach((r, i) => {
-    if (i > 0) cursor += 1; // breathing room between trees
-    assignY(r);
-  });
-
-  const X_STEP = 290;
-  const pos = new Map<string, { x: number; y: number }>();
-  const treeH = cursor * Y_GAP;
-  parent.forEach((_, id) => {
-    pos.set(id, { x: (depth.get(id) ?? 0) * X_STEP, y: (yOf.get(id) ?? 0) - treeH / 2 });
-  });
-
-  // Orphans: compact grid band under the trees.
-  if (orphans.length > 0) {
-    const cols = Math.min(orphans.length, 4);
-    orphans.forEach((n, i) => {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      pos.set(n.id, {
-        x: col * 230,
-        y: treeH / 2 + 50 + row * Y_GAP,
-      });
-    });
-  }
-
-  return nodes.map((n) => ({
-    id: n.id,
-    type: "gnode",
-    position: pos.get(n.id) ?? { x: 0, y: 0 },
-    data: { node: n, selected: false },
-  }) satisfies Node);
+function AINode({ data }: { data: { provider: string } }) {
+  const profile = aiProfile(data.provider);
+  return (
+    <div className="ai-graph-node" style={{ color: profile.color }} title={profile.label}>
+      <Anchors />
+      <AIIcon provider={data.provider} />
+      <NodeToolbar isVisible position={Position.Bottom} offset={10}>
+        <span className="gnode-label ai-label">{profile.label}</span>
+      </NodeToolbar>
+    </div>
+  );
 }
+
+const nodeTypes = { gnode: GNode, ai: AINode };
 
 function GraphControls({ selectedId }: { selectedId: string | null }) {
   const { fitView, setCenter, getNode } = useReactFlow();
@@ -184,8 +73,8 @@ function GraphControls({ selectedId }: { selectedId: string | null }) {
         className="btn sm"
         onClick={() => {
           const n = selectedId ? getNode(selectedId) : undefined;
-          if (n) setCenter(n.position.x + 80, n.position.y + 16, { zoom: 1.2, duration: 200 });
-          else fitView({ padding: 0.2, duration: 200 });
+          if (n) setCenter(n.position.x + (n.measured?.width ?? 18) / 2, n.position.y + (n.measured?.height ?? 18) / 2, { zoom: 1.2, duration: 200 });
+          else setCenter(0, 0, { zoom: 1, duration: 200 });
         }}
       >
         <Crosshair /> Center
@@ -194,15 +83,28 @@ function GraphControls({ selectedId }: { selectedId: string | null }) {
   );
 }
 
+function FitGraph({ layout }: { layout: ReturnType<typeof layoutGraph> }) {
+  const { fitView } = useReactFlow();
+  const initialized = useNodesInitialized();
+  useEffect(() => {
+    if (!initialized) return;
+    const frame = requestAnimationFrame(() => fitView({ padding: 0.25 }));
+    return () => cancelAnimationFrame(frame);
+  }, [initialized, layout, fitView]);
+  return null;
+}
+
 export function GraphView({ projectId }: { projectId?: string }) {
   const go = useApp((s) => s.go);
   const setComposer = useApp((s) => s.setComposer);
   const toast = useApp((s) => s.toast);
+  const aiProvider = useApp((s) => s.aiProvider) ?? "chatgpt";
   const [data, setData] = useState<GraphData | null>(null);
   const [types, setTypes] = useState<string[]>(ALL_TYPES);
   const [limit, setLimit] = useState(300);
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<GraphNode | null>(null);
+  const [hovered, setHovered] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ title: string; body: string; project?: string | null } | null>(null);
 
   const load = useCallback(async () => {
@@ -240,47 +142,74 @@ export function GraphView({ projectId }: { projectId?: string }) {
     return data.edges.filter((e) => ids.has(e.source) && ids.has(e.target));
   }, [data, visible]);
 
-  // Stable tree root per dataset: explicit project, else the first project.
-  const rootId = useMemo(() => {
-    if (projectId) return projectId;
-    return visible.find((n) => n.node_type === "project")?.id ?? null;
-  }, [data, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const nodes: Node[] = useMemo(
-    () =>
-      layoutTree(visible, visibleEdgePairs, rootId).map((n) => ({
-        ...n,
-        data: { ...(n.data as object), selected: (n.id as string) === selected?.id },
-      })),
-    [visible, visibleEdgePairs, rootId, selected],
-  );
-
-  const edges: Edge[] = useMemo(() => {
-    const ids = new Set(visible.map((n) => n.id));
-    const dropped = visibleEdgePairs.filter((e) => !ids.has(e.source) || !ids.has(e.target));
-    if (dropped.length > 0) {
-      console.warn(`[graph] ${dropped.length} edges reference missing nodes`, dropped.slice(0, 3));
+  const layout = useMemo(() => layoutGraph(visible, visibleEdgePairs), [visible, visibleEdgePairs]);
+  const focused = hovered ?? selected?.id ?? null;
+  const neighbors = useMemo(() => {
+    const ids = new Set<string>(focused ? [focused] : []);
+    if (focused) {
+      for (const edge of [...visibleEdgePairs, ...layout.hubLinks]) {
+        if (edge.source === focused) ids.add(edge.target);
+        if (edge.target === focused) ids.add(edge.source);
+      }
     }
-    return visibleEdgePairs
-      .filter((e) => ids.has(e.source) && ids.has(e.target))
-      .map((e) => {
-        const tree = e.relationship === "belongs_to";
-        const color = tree ? "#7b8494" : "rgba(55,148,255,0.8)";
-        return {
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          type: "smoothstep",
-          label: tree ? undefined : e.relationship,
-          style: { stroke: color, strokeWidth: 2 },
-          labelStyle: { fill: "#9da5b4", fontSize: 9, fontFamily: "var(--font)" },
-          markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color },
-        };
-      });
-  }, [visible, visibleEdgePairs]);
+    return ids;
+  }, [focused, visibleEdgePairs, layout]);
+
+  const nodes: Node[] = useMemo(() => [
+    {
+      id: AI_NODE_ID,
+      type: "ai",
+      position: { x: -42, y: -42 },
+      data: { provider: aiProvider },
+      draggable: false,
+    },
+    ...visible.map((n) => {
+      const point = layout.positions.get(n.id) ?? { x: 0, y: 0 };
+      const size = n.node_type === "skill" && skillIconSource(n.label, n.icon) ? 30 : n.node_type === "project" ? 22 : 18;
+      return {
+        id: n.id,
+        type: "gnode",
+        position: { x: point.x - size / 2, y: point.y - size / 2 },
+        data: {
+          node: n,
+          selected: selected?.id === n.id,
+          hovered: hovered === n.id,
+          dimmed: !!focused && !neighbors.has(n.id),
+          showLabel: visible.length <= 50 || n.node_type === "project",
+        },
+      };
+    }),
+  ], [visible, layout, aiProvider, selected, hovered, focused, neighbors]);
+
+  const edges: Edge[] = useMemo(() => [
+    ...layout.hubLinks.map((e) => ({
+      id: `hub-${e.target}`,
+      source: e.source,
+      target: e.target,
+      type: "straight",
+      style: { stroke: "#485466", strokeWidth: 1, opacity: focused && focused !== AI_NODE_ID && focused !== e.target ? 0.12 : 0.45 },
+    })),
+    ...visibleEdgePairs.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      type: "straight",
+      ariaLabel: `${e.source} ${e.relationship} ${e.target}`,
+      style: {
+        stroke: e.relationship === "belongs_to" ? "#596576" : "#8297b8",
+        strokeWidth: focused && (e.source === focused || e.target === focused) ? 1.8 : 1.2,
+        opacity: focused && e.source !== focused && e.target !== focused ? 0.12 : 0.75,
+      },
+    })),
+  ], [layout, visibleEdgePairs, focused]);
 
   const onNodeClick = useCallback(
     async (_: unknown, node: Node) => {
+      if (node.id === AI_NODE_ID) {
+        setSelected(null);
+        setDetail(null);
+        return;
+      }
       const gn = (node.data as { node: GraphNode }).node;
       setSelected(gn);
       try {
@@ -316,7 +245,7 @@ export function GraphView({ projectId }: { projectId?: string }) {
   const totalCount = data ? Object.values(data.counts).reduce((a, b) => a + b, 0) : 0;
 
   return (
-    <div className={projectId ? "graph-page" : "page graph-page"} style={projectId ? { height: "100%" } : { height: "calc(100vh - 59px)", maxWidth: "none", padding: 0 }}>
+    <div className={projectId ? "graph-page" : "page graph-page"}>
       {!projectId && (
         <div className="page-head" style={{ padding: "22px 26px 0" }}>
           <h1>Graph</h1>
@@ -343,7 +272,8 @@ export function GraphView({ projectId }: { projectId?: string }) {
             </select>
           </>
         )}
-        <span className="mono-dim">{visible.length} nodes · {edges.length} edges</span>
+        <span className="mono-dim">{visible.length} nodes · {visibleEdgePairs.length} edges</span>
+        <span className="mono-dim graph-hint">Drag nodes to move them · drag the background to pan</span>
         {data?.truncated && (
           <span className="mono-dim">Showing {visible.length} of {totalCount} — refine filters.</span>
         )}
@@ -351,7 +281,7 @@ export function GraphView({ projectId }: { projectId?: string }) {
       <div className="graph-body">
         <div className="graph-canvas">
           <ReactFlowProvider>
-            <FlowCanvas nodes={nodes} edges={edges} onNodeClick={onNodeClick} selectedId={selected?.id ?? null} />
+            <FlowCanvas nodes={nodes} edges={edges} layout={layout} onNodeClick={onNodeClick} onNodeMouseEnter={(_, node) => setHovered(node.id)} onNodeMouseLeave={() => setHovered(null)} selectedId={selected?.id ?? null} />
           </ReactFlowProvider>
         </div>
         {selected && (
@@ -395,29 +325,48 @@ export function GraphView({ projectId }: { projectId?: string }) {
 function FlowCanvas({
   nodes,
   edges,
+  layout,
   onNodeClick,
+  onNodeMouseEnter,
+  onNodeMouseLeave,
   selectedId,
 }: {
   nodes: Node[];
   edges: Edge[];
+  layout: ReturnType<typeof layoutGraph>;
   onNodeClick: (e: unknown, n: Node) => void;
+  onNodeMouseEnter: (e: unknown, n: Node) => void;
+  onNodeMouseLeave: () => void;
   selectedId: string | null;
 }) {
+  const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(nodes);
+  useEffect(() => {
+    setFlowNodes((current) => {
+      const positions = new Map(current.map((node) => [node.id, node.position]));
+      return nodes.map((node) => ({ ...node, position: positions.get(node.id) ?? node.position }));
+    });
+  }, [nodes, setFlowNodes]);
+
   return (
     <ReactFlow
-      nodes={nodes}
+      nodes={flowNodes}
       edges={edges}
       nodeTypes={nodeTypes}
       nodesConnectable={false}
+      nodesDraggable
+      onNodesChange={onNodesChange}
+      panOnDrag
       onNodeClick={onNodeClick}
+      onNodeMouseEnter={onNodeMouseEnter}
+      onNodeMouseLeave={onNodeMouseLeave}
       fitView
-      fitViewOptions={{ padding: 0.2 }}
-      minZoom={0.2}
-      maxZoom={2}
+      fitViewOptions={{ padding: 0.25 }}
+      minZoom={0.06}
+      maxZoom={3}
       proOptions={{ hideAttribution: true }}
       colorMode="dark"
     >
-      <Background gap={24} size={1.5} color="#24282e" />
+      <FitGraph layout={layout} />
       <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 5, display: "flex", gap: 6 }}>
         <GraphControls selectedId={selectedId} />
       </div>

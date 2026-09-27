@@ -14,7 +14,7 @@
 
 use rusqlite::Connection;
 use serde_json::{json, Value};
-use simplememory::{context, db, graph, models, repos, search};
+use simplememory::{context, db, graph, models, repos, search, storage};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
@@ -29,13 +29,14 @@ fn db_path() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-        return PathBuf::from(base).join("com.simplememory.app").join("simplememory.db");
+        let default = PathBuf::from(base).join("com.simplememory.app").join("simplememory.db");
+        return storage::db_path(&default).expect("configured Contexta database unavailable");
     }
     #[cfg(not(target_os = "windows"))]
     {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        return PathBuf::from(home)
-            .join(".local/share/com.simplememory.app/simplememory.db");
+        let default = PathBuf::from(home).join(".local/share/com.simplememory.app/simplememory.db");
+        return storage::db_path(&default).expect("configured Contexta database unavailable");
     }
 }
 
@@ -334,6 +335,7 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
                 description: s(args, "description"),
                 content: s(args, "content"),
                 category: opt_str(args, "category"),
+                icon: opt_str(args, "icon"),
             })?;
             Ok(text_result(json!(sk)))
         }
@@ -343,6 +345,7 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
                 description: s(args, "description"),
                 content: s(args, "content"),
                 category: opt_str(args, "category"),
+                icon: opt_str(args, "icon"),
             })?;
             Ok(text_result(json!(sk)))
         }

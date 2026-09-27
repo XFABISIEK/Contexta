@@ -4,6 +4,7 @@ import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import { debounce, MEMORY_TYPES, PRIORITIES } from "../lib/utils";
 import { Modal } from "./Modal";
+import { SkillIcon } from "./SkillIcon";
 import type { ComposerState, Memory, Project } from "../types";
 
 const projectSchema = z.object({
@@ -26,6 +27,7 @@ const skillSchema = z.object({
   description: z.string().max(4000).default(""),
   content: z.string().max(100000).default(""),
   category: z.string().max(80).default("general"),
+  icon: z.string().max(180000).default(""),
 });
 
 const personalSchema = z.object({
@@ -384,10 +386,12 @@ function RuleModal({ composer, onDone }: { composer: ComposerState; onDone: () =
 
 function SkillModal({ composer, onDone }: { composer: ComposerState; onDone: () => void }) {
   const toast = useApp((s) => s.toast);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [content, setContent] = useState("");
   const [category, setCategory] = useState("general");
+  const [icon, setIcon] = useState("");
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -399,12 +403,13 @@ function SkillModal({ composer, onDone }: { composer: ComposerState; onDone: () 
         setDescription(s.description);
         setContent(s.content);
         setCategory(s.category);
+        setIcon(s.icon ?? "");
       }
     }).catch((e) => setErr(e.message));
   }, [composer.editId]);
 
   const save = async () => {
-    const parsed = skillSchema.safeParse({ name, description, content, category });
+    const parsed = skillSchema.safeParse({ name, description, content, category, icon });
     if (!parsed.success) {
       setErr(parsed.error.issues[0]?.message ?? "Invalid input");
       return;
@@ -445,6 +450,28 @@ function SkillModal({ composer, onDone }: { composer: ComposerState; onDone: () 
           <label>Category</label>
           <input className="input" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="general" />
         </div>
+      </div>
+      <div className="field">
+        <label>Icon</label>
+        <div className="skill-icon-picker">
+          <span className="row-icon"><SkillIcon name={name} icon={icon} /></span>
+          <button className="btn sm" type="button" onClick={() => fileRef.current?.click()}>Choose image</button>
+          {icon && <button className="btn sm ghost" type="button" onClick={() => setIcon("")}>Remove custom icon</button>}
+          <span className="mono-dim">PNG, JPEG or WebP · max 128 KB</span>
+        </div>
+        <input ref={fileRef} className="file-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (!file) return;
+          if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 128 * 1024) {
+            setErr("Choose a PNG, JPEG or WebP image smaller than 128 KB.");
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = () => { if (typeof reader.result === "string") { setIcon(reader.result); setErr(""); } };
+          reader.onerror = () => setErr("Could not read the image.");
+          reader.readAsDataURL(file);
+        }} />
       </div>
       <div className="field">
         <label>Description</label>

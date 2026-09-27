@@ -59,7 +59,7 @@ export function Dashboard() {
     <div className="page">
       <div className="hero">
         <motion.h1 initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
-          Simple<span className="accent">Memory</span>
+          Context<span className="accent">a</span>
         </motion.h1>
         <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25, delay: 0.05 }}>
           Your local memory layer for AI — fast hybrid retrieval over projects, rules and skills.

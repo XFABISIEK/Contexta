@@ -44,6 +44,7 @@ export interface Skill {
   description: string;
   content: string;
   category: string;
+  icon: string;
   created_at: string;
   updated_at: string;
 }
@@ -95,6 +96,7 @@ export interface GraphNode {
   label: string;
   project_id: string | null;
   priority: string | null;
+  icon?: string | null;
 }
 
 export interface GraphEdge {
@@ -132,6 +134,11 @@ export interface DbInfo {
   size_bytes: number;
 }
 
+export interface StorageSetupInfo {
+  configured: boolean;
+  default_path: string;
+}
+
 export interface ImportResult {
   project: string;
   memories: number;
@@ -146,6 +153,7 @@ export type View =
   | "rules"
   | "skills"
   | "personal"
+  | "information"
   | "settings";
 
 export type ComposerKind = "project" | "memory" | "rule" | "skill" | "personal";

@@ -16,6 +16,7 @@ import { api } from "../lib/tauri";
 import { timeAgo, truncate } from "../lib/utils";
 import { EmptyState } from "../components/Modal";
 import type { Connection, Memory, Project, Rule, Skill } from "../types";
+import { SkillIcon } from "../components/SkillIcon";
 
 const GraphViewLazy = lazy(() =>
   import("./GraphView").then((m) => ({ default: m.GraphView })),
@@ -310,7 +311,7 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }) {
               <div className="list">
                 {linkedSkills.map((s) => (
                   <div key={s.id} className="row" onClick={() => setComposer({ kind: "skill", editId: s.id })}>
-                    <div className="row-icon"><Wrench /></div>
+                    <div className="row-icon"><SkillIcon name={s.name} icon={s.icon} /></div>
                     <div className="row-main">
                       <div className="row-title">{s.name}</div>
                       <div className="row-sub">{truncate(s.description, 110)}</div>

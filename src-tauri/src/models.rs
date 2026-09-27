@@ -97,6 +97,8 @@ pub struct Skill {
     pub content: String,
     #[serde(default)]
     pub category: String,
+    #[serde(default)]
+    pub icon: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -107,6 +109,7 @@ pub struct NewSkill {
     pub description: Option<String>,
     pub content: Option<String>,
     pub category: Option<String>,
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,6 +183,8 @@ pub struct GraphNode {
     pub label: String,
     pub project_id: Option<String>,
     pub priority: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

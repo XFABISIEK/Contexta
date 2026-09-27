@@ -13,6 +13,7 @@ import type {
   Rule,
   SearchResult,
   Skill,
+  StorageSetupInfo,
   Tag,
 } from "../types";
 
@@ -25,6 +26,10 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 export const api = {
+  storage: {
+    info: () => call<StorageSetupInfo>("get_storage_setup"),
+    complete: (directory: string | null) => call<string>("complete_storage_setup", { directory }),
+  },
   stats: () => call<DashboardStats>("get_dashboard_stats"),
   dbInfo: () => call<DbInfo>("get_db_info"),
 
@@ -94,9 +99,9 @@ export const api = {
   skills: {
     list: (query?: string | null, category?: string | null, limit = 50, offset = 0) =>
       call<Paged<Skill>>("list_skills", { query: query ?? null, category: category ?? null, limit, offset }),
-    create: (input: { name: string; description?: string; content?: string; category?: string }) =>
+    create: (input: { name: string; description?: string; content?: string; category?: string; icon?: string }) =>
       call<Skill>("create_skill", { input }),
-    update: (id: string, input: { name: string; description?: string; content?: string; category?: string }) =>
+    update: (id: string, input: { name: string; description?: string; content?: string; category?: string; icon?: string }) =>
       call<Skill>("update_skill", { id, input }),
     remove: (id: string) => call<void>("delete_skill", { id }),
   },

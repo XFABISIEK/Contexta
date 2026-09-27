@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Brain, Minus, Square, Copy, X } from "lucide-react";
+import { Minus, Square, Copy, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import appIcon from "../../src-tauri/icons/128x128.png";
 
 export function Titlebar() {
   const [maximized, setMaximized] = useState(false);
@@ -22,8 +23,8 @@ export function Titlebar() {
     <div className="titlebar">
       <div className="tb-drag" data-tauri-drag-region>
         <span className="tb-logo">
-          <Brain />
-          SimpleMemory
+          <img src={appIcon} alt="" />
+          Contexta
         </span>
       </div>
       <div className="tb-controls">
