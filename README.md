@@ -24,6 +24,10 @@
   <a href="https://github.com/XFABISIEK/Contexa/issues">Report an issue</a>
 </p>
 
+<p align="center">
+  <img src=".Images/dashboard.png" alt="Contexta dashboard" width="860" />
+</p>
+
 Native desktop app (Tauri 2) · React + TypeScript UI · Rust backend · SQLite + FTS5 ·
 hybrid search (FTS today, vector-ready) · relation graph · project context builder.
 
@@ -37,7 +41,7 @@ React UI  →  Tauri IPC  →  Rust services  →  SQLite (WAL)
 
 ## Features
 
-- **Dashboard** — hero search, live statistics, recent memories, modified projects, quick actions
+- **Dashboard** — quick actions, live statistics, recent memories, modified projects
 - **Projects** — overview, memories, rules, linked skills and a scoped graph per project
 - **Memories / Rules / Skills / Personal** — full CRUD, priorities (`critical` always reach AI context), tags, FTS search, pagination
 - **Graph** — force-directed relation view (drag, pan, zoom, fit/center, type filters, neighbor highlight, details panel)
@@ -71,8 +75,8 @@ React UI  →  Tauri IPC  →  Rust services  →  SQLite (WAL)
 ```bash
 npm install
 
-# Run the desktop app in dev mode (Vite is used internally by Tauri only):
-npm run tauri dev
+# Run the desktop app in dev mode (native window, no browser):
+npm run dev
 ```
 
 The app opens as a **native window**. In dev, an empty database is seeded
@@ -83,7 +87,7 @@ automatically with demo projects (`Contexta`, `Axiom`), rules, memories and skil
 | Command               | What it does                              |
 | --------------------- | ----------------------------------------- |
 | `npm install`         | Install frontend dependencies             |
-| `npm run tauri dev`   | Run the desktop app (dev)                 |
+| `npm run dev`         | Run the desktop app (native window, dev)  |
 | `npm run build`       | Type-check + bundle the frontend to `dist/` |
 | `npm run tauri build` | Produce signed updater bundles when `TAURI_SIGNING_PRIVATE_KEY` is set |
 | `cargo check` / `cargo test` (in `src-tauri/`) | Check / test the Rust backend |

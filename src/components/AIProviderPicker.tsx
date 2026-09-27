@@ -31,7 +31,7 @@ const LEGACY_IDS: Record<string, string> = {
   "mistral-vibe": "mistral",
 };
 
-const INVERT_ICONS = new Set(["cursor", "windsurf"]);
+const INVERT_ICONS = new Set(["copilot", "cursor", "windsurf"]);
 
 export function aiProfile(value: string) {
   const id = LEGACY_IDS[value] ?? value;

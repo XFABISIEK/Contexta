@@ -112,7 +112,13 @@ export function App() {
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Desktop app: no right-click menu.
+    const noMenu = (e: MouseEvent) => e.preventDefault();
+    window.addEventListener("contextmenu", noMenu);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("contextmenu", noMenu);
+    };
   }, []);
 
   if (startupError) return <div className="app"><Titlebar /><div className="ai-setup mono-dim" role="alert">{startupError}</div></div>;

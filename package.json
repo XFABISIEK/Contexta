@@ -4,9 +4,9 @@
   "version": "0.1.2",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "tauri dev",
+    "dev:web": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  Search,
   Plus,
   Folder,
   Brain,
@@ -29,7 +28,6 @@ export function Dashboard() {
   const refreshStats = useApp((s) => s.refreshStats);
   const go = useApp((s) => s.go);
   const setComposer = useApp((s) => s.setComposer);
-  const setSearch = useApp((s) => s.setSearch);
   const toast = useApp((s) => s.toast);
   const [recent, setRecent] = useState<Memory[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -70,10 +68,6 @@ export function Dashboard() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.2, delay: 0.1 }}
         >
-          <div className="search-input" onClick={() => setSearch(true)}>
-            <Search />
-            <input placeholder="Search memory...  (Ctrl+Shift+F)" readOnly />
-          </div>
           <button className="btn primary" onClick={() => setComposer({ kind: "memory" })}>
             <Plus /> New Memory
           </button>

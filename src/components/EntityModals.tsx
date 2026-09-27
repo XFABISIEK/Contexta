@@ -125,7 +125,7 @@ function ProjectModal({ composer, onDone }: { composer: ComposerState; onDone: (
       <div className="field">
         <label>Local folder (optional)</label>
         <div style={{ display: "flex", gap: 8 }}>
-          <input className="input" value={path} onChange={(e) => setPath(e.target.value)} placeholder="D:\Projekty\Axiom" style={{ flex: 1 }} />
+          <input className="input" value={path} onChange={(e) => setPath(e.target.value)} placeholder="C:\Desktop\Projects\Contexa" style={{ flex: 1 }} />
           <button type="button" className="btn sm" onClick={browse} title="Browse folders">
             <FolderOpen size={14} /> Browse
           </button>

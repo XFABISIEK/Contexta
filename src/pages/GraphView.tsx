@@ -48,7 +48,7 @@ function Anchors() {
 function GNode({ data }: { data: { node: GraphNode; selected: boolean; hovered: boolean; dimmed: boolean; showLabel: boolean } }) {
   const skillIcon = data.node.node_type === "skill" ? skillIconSource(data.node.label, data.node.icon) : null;
   return (
-    <div className={cx("gnode", `gnode-${data.node.node_type}`, skillIcon && "has-icon", data.selected && "selected", data.dimmed && "dimmed")} title={data.node.label}>
+    <div className={cx("gnode", `gnode-${data.node.node_type}`, skillIcon && "has-icon", data.selected && "selected", data.dimmed && "dimmed")}>
       <Anchors />
       {skillIcon && <img className="gnode-icon" src={skillIcon} alt="" aria-hidden="true" draggable={false} />}
       <NodeToolbar isVisible={data.showLabel || data.selected || data.hovered} position={Position.Bottom} offset={8}>
@@ -61,7 +61,7 @@ function GNode({ data }: { data: { node: GraphNode; selected: boolean; hovered: 
 function AINode({ data }: { data: { provider: string } }) {
   const profile = aiProfile(data.provider);
   return (
-    <div className="ai-graph-node" style={{ color: profile.color }} title={profile.label}>
+    <div className="ai-graph-node" style={{ color: profile.color }}>
       <Anchors />
       <AIIcon provider={data.provider} />
       <NodeToolbar isVisible position={Position.Bottom} offset={10}>
@@ -139,6 +139,7 @@ export function GraphView({ projectId }: { projectId?: string }) {
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<GraphNode | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
+  const [tip, setTip] = useState<{ id: string; x: number; y: number } | null>(null);
   const [detail, setDetail] = useState<{ title: string; body: string; project?: string | null } | null>(null);
 
   const load = useCallback(async () => {
@@ -279,6 +280,15 @@ export function GraphView({ projectId }: { projectId?: string }) {
 
   const totalCount = data ? Object.values(data.counts).reduce((a, b) => a + b, 0) : 0;
 
+  const tipNode = tip
+    ? tip.id === AI_NODE_ID
+      ? { kind: "AI assistant", label: aiProfile(aiProvider).label }
+      : (() => {
+          const n = visible.find((v) => v.id === tip.id);
+          return n ? { kind: TYPE_META[n.node_type]?.label ?? n.node_type, label: n.label } : null;
+        })()
+    : null;
+
   return (
     <div className={projectId ? "graph-page" : "page graph-page"}>
       {!projectId && (
@@ -334,8 +344,32 @@ export function GraphView({ projectId }: { projectId?: string }) {
       <div className="graph-body">
         <div className="graph-canvas">
           <ReactFlowProvider>
-            <FlowCanvas nodes={nodes} edges={edges} layoutKey={layoutKey} onNodeClick={onNodeClick} onNodeMouseEnter={(_, node) => setHovered(node.id)} onNodeMouseLeave={() => setHovered(null)} selectedId={selected?.id ?? null} />
+            <FlowCanvas
+              nodes={nodes}
+              edges={edges}
+              layoutKey={layoutKey}
+              onNodeClick={onNodeClick}
+              onNodeMouseEnter={(_, node) => setHovered(node.id)}
+              onNodeMouseMove={(e, node) => {
+                const ev = e as unknown as globalThis.MouseEvent;
+                setTip({ id: node.id, x: ev.clientX, y: ev.clientY });
+              }}
+              onNodeMouseLeave={() => { setHovered(null); setTip(null); }}
+              selectedId={selected?.id ?? null}
+            />
           </ReactFlowProvider>
+          {tipNode && (
+            <div
+              className="graph-tip"
+              style={{
+                left: Math.min(tip!.x + 14, window.innerWidth - 240),
+                top: Math.max(tip!.y - 12, 8),
+              }}
+            >
+              <span className="graph-tip-type">{tipNode.kind}</span>
+              <span className="graph-tip-name">{tipNode.label}</span>
+            </div>
+          )}
         </div>
         {selected && (
           <div className="graph-side">
@@ -381,6 +415,7 @@ function FlowCanvas({
   layoutKey,
   onNodeClick,
   onNodeMouseEnter,
+  onNodeMouseMove,
   onNodeMouseLeave,
   selectedId,
 }: {
@@ -389,6 +424,7 @@ function FlowCanvas({
   layoutKey: string;
   onNodeClick: (e: unknown, n: Node) => void;
   onNodeMouseEnter: (e: unknown, n: Node) => void;
+  onNodeMouseMove: (e: unknown, n: Node) => void;
   onNodeMouseLeave: () => void;
   selectedId: string | null;
 }) {
@@ -414,10 +450,11 @@ function FlowCanvas({
       zoomOnPinch
       onNodeClick={onNodeClick}
       onNodeMouseEnter={onNodeMouseEnter}
+      onNodeMouseMove={onNodeMouseMove}
       onNodeMouseLeave={onNodeMouseLeave}
       fitView
       fitViewOptions={{ padding: 0.25 }}
-      minZoom={0.15}
+      minZoom={0.02}
       maxZoom={3}
       proOptions={{ hideAttribution: true }}
       colorMode="dark"

@@ -24,7 +24,7 @@ function level(count: number): string {
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function ActivityHeatmap({ days }: { days: ActivityDay[] }) {
-  const [hovered, setHovered] = useState<{ date: string; count: number } | null>(null);
+  const [hovered, setHovered] = useState<{ date: string; count: number; x: number; y: number } | null>(null);
   const { weeks, months, total } = useMemo(() => {
     const counts = new Map(days.map((d) => [d.date, d.count]));
     const today = new Date();
@@ -88,8 +88,8 @@ function ActivityHeatmap({ days }: { days: ActivityDay[] }) {
                       key={di}
                       className="heat-cell"
                       style={{ background: level(cell.count) }}
-                      title={`${cell.count} contribution${cell.count === 1 ? "" : "s"} on ${cell.date}`}
-                      onMouseEnter={() => setHovered(cell)}
+                      onMouseEnter={(e) => setHovered({ ...cell, x: e.clientX, y: e.clientY })}
+                      onMouseMove={(e) => setHovered({ ...cell, x: e.clientX, y: e.clientY })}
                       onMouseLeave={() => setHovered(null)}
                     />
                   ) : (
@@ -102,11 +102,7 @@ function ActivityHeatmap({ days }: { days: ActivityDay[] }) {
         </div>
       </div>
       <div className="heat-legend">
-        <span>
-          {hovered
-            ? `${hovered.count} contribution${hovered.count === 1 ? "" : "s"} on ${hovered.date}`
-            : `${total} contributions in the last year`}
-        </span>
+        <span>{total} contributions in the last year</span>
         <span className="heat-scale">
           Less
           {[0, 1, 4, 7, 12].map((c) => (
@@ -115,6 +111,17 @@ function ActivityHeatmap({ days }: { days: ActivityDay[] }) {
           More
         </span>
       </div>
+      {hovered && (
+        <div
+          className="heat-tip"
+          style={{
+            left: Math.min(hovered.x + 14, window.innerWidth - 220),
+            top: Math.max(hovered.y - 10, 8),
+          }}
+        >
+          {hovered.count} contribution{hovered.count === 1 ? "" : "s"} on {hovered.date}
+        </div>
+      )}
     </div>
   );
 }

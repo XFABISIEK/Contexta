@@ -17,12 +17,13 @@ import { useApp } from "../stores/app-store";
 import { cx } from "../lib/utils";
 import type { View } from "../types";
 
-const PROJECT_VIEWS: View[] = ["projects", "memories", "rules", "personal"];
+const PROJECT_VIEWS: View[] = ["projects", "memories", "rules", "skills", "personal"];
 
 const PROJECT_SUBS: Array<{ view: View; label: string; icon: typeof Folder; all?: boolean }> = [
   { view: "projects", label: "All projects", icon: Folder, all: true },
   { view: "memories", label: "Memories", icon: Brain },
   { view: "rules", label: "Rules", icon: ScrollText },
+  { view: "skills", label: "Skills", icon: Wrench },
   { view: "personal", label: "Personal", icon: User },
 ];
 
@@ -83,14 +84,6 @@ export function Sidebar() {
         )}
       </AnimatePresence>
 
-      <button
-        className={cx("side-item", view === "skills" && "active")}
-        onClick={() => go("skills")}
-        title="Skills"
-      >
-        <Wrench />
-        <span className="side-text">Skills</span>
-      </button>
       <button
         className={cx("side-item", view === "graph" && "active")}
         onClick={() => go("graph")}

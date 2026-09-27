@@ -23,3 +23,21 @@ test("AI stays centered and every top-level component joins the layout", () => {
   for (const point of positions.values()) assert.ok(Number.isFinite(point.x) && Number.isFinite(point.y));
   assert.notDeepEqual(positions.get("project"), positions.get("memory"));
 });
+
+test("spread stays bounded so fit/zoom-out works at 100 and 600 nodes", () => {
+  for (const count of [100, 600]) {
+    const nodes = Array.from({ length: count }, (_, i) => ({
+      id: `n${i}`,
+      node_type: "memory",
+      label: `M${i}`,
+      project_id: null,
+      priority: null,
+    }));
+    const { positions } = layoutGraph(nodes, []);
+    assert.equal(positions.size, count + 1);
+    for (const [id, point] of positions) {
+      assert.ok(Number.isFinite(point.x) && Number.isFinite(point.y), id);
+      assert.ok(Math.abs(point.x) <= 850 && Math.abs(point.y) <= 850, `${id} out of bounds`);
+    }
+  }
+});

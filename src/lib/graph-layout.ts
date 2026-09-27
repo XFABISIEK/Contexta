@@ -43,8 +43,18 @@ export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[]) {
   // ponytail: synchronous layout relies on the current graph cap; use a worker if it causes visible pauses.
   simulation.tick(120);
 
+  // Keep the spread bounded so fitView/zoom-out works at 100+ nodes:
+  // the force spread grows with node count, otherwise fit clamps at
+  // minZoom and the graph can never be fully zoomed out.
+  let maxAbs = 0;
+  for (const n of simNodes) {
+    maxAbs = Math.max(maxAbs, Math.abs(n.x ?? 0), Math.abs(n.y ?? 0));
+  }
+  const BOUND = 850;
+  const scale = maxAbs > BOUND ? BOUND / maxAbs : 1;
+
   return {
-    positions: new Map(simNodes.map((n) => [n.id, { x: n.x ?? 0, y: n.y ?? 0 }])),
+    positions: new Map(simNodes.map((n) => [n.id, { x: (n.x ?? 0) * scale, y: (n.y ?? 0) * scale }])),
     hubLinks,
   };
 }

@@ -13,6 +13,8 @@ import {
   Wrench,
   Link2,
   Unlink,
+  LayoutDashboard,
+  Network,
 } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
@@ -27,6 +29,13 @@ const GraphViewLazy = lazy(() =>
 );
 
 type Tab = "overview" | "memories" | "rules" | "graph";
+
+const TABS: Array<{ id: Tab; label: string; icon: typeof Folder }> = [
+  { id: "overview", label: "Overview", icon: LayoutDashboard },
+  { id: "memories", label: "Memories", icon: Brain },
+  { id: "rules", label: "Rules", icon: ScrollText },
+  { id: "graph", label: "Graph", icon: Network },
+];
 
 export function Projects() {
   const selectedId = useApp((s) => s.selectedProjectId);
@@ -270,9 +279,10 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }) {
       </div>
 
       <div className="tabs">
-        {(["overview", "memories", "rules", "graph"] as Tab[]).map((t) => (
-          <button key={t} className={tab === t ? "tab active" : "tab"} onClick={() => setTab(t)}>
-            {t[0].toUpperCase() + t.slice(1)}
+        {TABS.map((t) => (
+          <button key={t.id} className={tab === t.id ? "tab active" : "tab"} onClick={() => setTab(t.id)}>
+            <t.icon size={13} />
+            {t.label}
           </button>
         ))}
       </div>
