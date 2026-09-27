@@ -5,22 +5,28 @@ import openai from "../assets/ai/openai.svg";
 import claude from "../assets/ai/claude.svg";
 import gemini from "../assets/ai/gemini.svg";
 import copilot from "../assets/ai/copilot.svg";
+import perplexity from "../assets/ai/perplexity.svg";
+import mistral from "../assets/ai/mistral.svg";
 import deepseek from "../assets/ai/deepseek.svg";
 import grok from "../assets/ai/grok.svg";
+import meta from "../assets/ai/meta.svg";
+import qwen from "../assets/ai/qwen.svg";
+import kimi from "../assets/ai/kimi.svg";
+import poe from "../assets/ai/poe.svg";
 
 export const AI_PROVIDERS = [
   { id: "chatgpt", label: "ChatGPT", icon: openai, color: "#74c8a7" },
   { id: "claude", label: "Claude", icon: claude, color: "#e4a77d" },
   { id: "gemini", label: "Gemini", icon: gemini, color: "#a8a7f5" },
   { id: "copilot", label: "Copilot", icon: copilot, color: "#8cb8ef" },
-  { id: "perplexity", label: "Perplexity", icon: null, color: "#57c6c8" },
-  { id: "mistral-vibe", label: "Mistral Vibe", icon: null, color: "#f0a24b" },
+  { id: "perplexity", label: "Perplexity", icon: perplexity, color: "#57c6c8" },
+  { id: "mistral-vibe", label: "Mistral Vibe", icon: mistral, color: "#f0a24b" },
   { id: "deepseek", label: "DeepSeek", icon: deepseek, color: "#76aaff" },
   { id: "grok", label: "Grok", icon: grok, color: "#d3d7df" },
-  { id: "meta-ai", label: "Meta AI", icon: null, color: "#78aaff" },
-  { id: "qwen", label: "Qwen", icon: null, color: "#a58cf2" },
-  { id: "kimi", label: "Kimi", icon: null, color: "#d4c0ff" },
-  { id: "poe", label: "Poe", icon: null, color: "#d1a6e9" },
+  { id: "meta-ai", label: "Meta AI", icon: meta, color: "#78aaff" },
+  { id: "qwen", label: "Qwen", icon: qwen, color: "#a58cf2" },
+  { id: "kimi", label: "Kimi", icon: kimi, color: "#d4c0ff" },
+  { id: "poe", label: "Poe", icon: poe, color: "#d1a6e9" },
 ] as const;
 
 export function aiProfile(value: string) {
