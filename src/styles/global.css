@@ -499,6 +499,7 @@ select.input { width: auto; }
 .ai-graph-node .ai-monogram { font-size: 24px; border-radius: 10px; }
 .ai-label { color: var(--text-primary); font-size: 12px; font-weight: 600; }
 .graph-canvas .react-flow { --xy-background-color: var(--background); }
+.graph-panel.react-flow__panel { display: flex; gap: 6px; margin: 12px; }
 
 /* ---------- misc ---------- */
 

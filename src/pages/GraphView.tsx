@@ -4,6 +4,7 @@ import {
   Background,
   Handle,
   Position,
+  Panel,
   useReactFlow,
   useNodesInitialized,
   ReactFlowProvider,
@@ -409,9 +410,9 @@ function FlowCanvas({
     >
       <Background gap={24} size={1.5} color="#24282e" />
       <FitGraph layoutKey={layoutKey} />
-      <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 5, display: "flex", gap: 6 }}>
+      <Panel position="bottom-left" className="graph-panel">
         <GraphControls selectedId={selectedId} />
-      </div>
+      </Panel>
     </ReactFlow>
   );
 }

@@ -8,8 +8,18 @@ type SimLink = SimulationLinkDatum<SimNode> & { hub?: boolean };
 
 export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[]) {
   const ids = new Set(nodes.map((n) => n.id));
+  const linked = new Set<string>();
+  for (const e of edges) {
+    if (ids.has(e.source) && ids.has(e.target) && e.source !== e.target) {
+      linked.add(e.source);
+      linked.add(e.target);
+    }
+  }
+  // Hub anchors: projects plus true orphans (no project anchor and no edges).
+  // Anything already wired (e.g. a skill used by a project) hangs off its
+  // own neighbors instead of being torn toward the AI center.
   const hubLinks = nodes
-    .filter((n) => n.node_type === "project" || !n.project_id || !ids.has(n.project_id))
+    .filter((n) => n.node_type === "project" || (!n.project_id && !linked.has(n.id)))
     .map((n) => ({ source: AI_NODE_ID, target: n.id }));
   // Deterministic seed: same input -> same layout, no reshuffle on reload.
   const simNodes: SimNode[] = [
