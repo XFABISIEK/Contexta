@@ -117,7 +117,7 @@ export function GraphView({ projectId }: { projectId?: string }) {
   const go = useApp((s) => s.go);
   const setComposer = useApp((s) => s.setComposer);
   const toast = useApp((s) => s.toast);
-  const aiProvider = useApp((s) => s.aiProvider) ?? "chatgpt";
+  const aiProvider = useApp((s) => s.aiProvider) ?? "claude-code";
   const [data, setData] = useState<GraphData | null>(null);
   const [types, setTypes] = useState<string[]>(ALL_TYPES);
   const [limit, setLimit] = useState(300);
