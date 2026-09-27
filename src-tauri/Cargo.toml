@@ -1,6 +1,6 @@
 [package]
 name = "simplememory"
-version = "0.1.2"
+version = "0.0.1"
 description = "Contexta - local memory layer for AI"
 edition = "2021"
 rust-version = "1.77.2"
