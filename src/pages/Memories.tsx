@@ -63,8 +63,8 @@ export function Memories() {
 
   useEffect(() => {
     const onChange = () => load(offset, query, projectId, memoryType, priority);
-    window.addEventListener("simplememory:changed", onChange);
-    return () => window.removeEventListener("simplememory:changed", onChange);
+    window.addEventListener("contexa:changed", onChange);
+    return () => window.removeEventListener("contexa:changed", onChange);
   }, [load, offset, query, projectId, memoryType, priority]);
 
   const onQuery = (q: string) => {

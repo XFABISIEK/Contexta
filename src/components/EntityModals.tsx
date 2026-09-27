@@ -612,7 +612,7 @@ export function EntityModals() {
     setComposer(null);
     refreshStats();
     // Notify list pages to reload via a lightweight event.
-    window.dispatchEvent(new CustomEvent("simplememory:changed"));
+    window.dispatchEvent(new CustomEvent("contexa:changed"));
   };
 
   switch (composer.kind) {

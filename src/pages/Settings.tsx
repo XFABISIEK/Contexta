@@ -1,49 +1,45 @@
 import { useEffect, useRef, useState } from "react";
-import { check, type Update } from "@tauri-apps/plugin-updater";
-import { getVersion } from "@tauri-apps/api/app";
 import { Database, Copy, Download, Upload, Cpu, Plug } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
-import { AIProviderPicker } from "../components/AIProviderPicker";
 import { Select } from "../components/Select";
-import { UpdateModal } from "../components/UpdateModal";
 import { downloadText, readFileText } from "../lib/utils";
 import type { DbInfo, Project } from "../types";
 
 const MCP_TOOLS = [
-  { name: "simplememory_search", description: "Hybrid FTS search across projects, memories, rules, skills.", mapsTo: "search_everything" },
-  { name: "simplememory_get_project", description: "Fetch a single project by id or name.", mapsTo: "get_project" },
-  { name: "simplememory_get_project_context", description: "Assemble optimized AI context: critical rules, memories, skills, markdown.", mapsTo: "get_project_context" },
-  { name: "simplememory_get_rules", description: "List enabled rules, critical first.", mapsTo: "list_rules" },
-  { name: "simplememory_get_memories", description: "Ranked memory retrieval with filters.", mapsTo: "list_memories" },
-  { name: "simplememory_get_skills", description: "List skills by keyword/category.", mapsTo: "list_skills" },
-  { name: "simplememory_get_personal_context", description: "Personal info, only on query match.", mapsTo: "search (personal scope)" },
-  { name: "simplememory_get_graph", description: "Capped relation graph with edges.", mapsTo: "get_graph" },
-  { name: "simplememory_add_memory", description: "AI: store a memory (priority controls context inclusion).", mapsTo: "create_memory" },
-  { name: "simplememory_update_memory", description: "AI: patch a memory; tags replace.", mapsTo: "update_memory" },
-  { name: "simplememory_delete_memory", description: "AI: delete a memory.", mapsTo: "delete_memory" },
-  { name: "simplememory_add_rule", description: "AI: add a project or global rule.", mapsTo: "create_rule" },
-  { name: "simplememory_update_rule", description: "AI: replace a rule.", mapsTo: "update_rule" },
-  { name: "simplememory_delete_rule", description: "AI: delete a rule.", mapsTo: "delete_rule" },
-  { name: "simplememory_add_skill", description: "AI: add a reusable skill.", mapsTo: "create_skill" },
-  { name: "simplememory_update_skill", description: "AI: replace a skill.", mapsTo: "update_skill" },
-  { name: "simplememory_delete_skill", description: "AI: delete a skill.", mapsTo: "delete_skill" },
-  { name: "simplememory_add_project", description: "AI: create a project.", mapsTo: "create_project" },
-  { name: "simplememory_update_project", description: "AI: rename / re-describe a project.", mapsTo: "update_project" },
-  { name: "simplememory_delete_project", description: "AI: delete a project.", mapsTo: "delete_project" },
-  { name: "simplememory_add_personal", description: "AI: store a personal entry (stays local).", mapsTo: "create_personal" },
-  { name: "simplememory_update_personal", description: "AI: replace a personal entry.", mapsTo: "update_personal" },
-  { name: "simplememory_delete_personal", description: "AI: delete a personal entry.", mapsTo: "delete_personal" },
-  { name: "simplememory_link", description: "AI: relate two entities (project uses skill…).", mapsTo: "create_connection" },
-  { name: "simplememory_unlink", description: "AI: remove a relation.", mapsTo: "delete_connection" },
-  { name: "simplememory_scan_project", description: "AI: import agent instruction files from the project folder.", mapsTo: "scan_project_files" },
+  { name: "contexa_search", description: "Hybrid FTS search across projects, memories, rules, skills.", mapsTo: "search_everything" },
+  { name: "contexa_get_project", description: "Fetch a single project by id or name.", mapsTo: "get_project" },
+  { name: "contexa_get_project_context", description: "Assemble optimized AI context: critical rules, memories, skills, markdown.", mapsTo: "get_project_context" },
+  { name: "contexa_get_rules", description: "List enabled rules, critical first.", mapsTo: "list_rules" },
+  { name: "contexa_get_memories", description: "Ranked memory retrieval with filters.", mapsTo: "list_memories" },
+  { name: "contexa_get_skills", description: "List skills by keyword/category.", mapsTo: "list_skills" },
+  { name: "contexa_get_personal_context", description: "Personal info, only on query match.", mapsTo: "search (personal scope)" },
+  { name: "contexa_get_graph", description: "Capped relation graph with edges.", mapsTo: "get_graph" },
+  { name: "contexa_add_memory", description: "AI: store a memory (priority controls context inclusion).", mapsTo: "create_memory" },
+  { name: "contexa_update_memory", description: "AI: patch a memory; tags replace.", mapsTo: "update_memory" },
+  { name: "contexa_delete_memory", description: "AI: delete a memory.", mapsTo: "delete_memory" },
+  { name: "contexa_add_rule", description: "AI: add a project or global rule.", mapsTo: "create_rule" },
+  { name: "contexa_update_rule", description: "AI: replace a rule.", mapsTo: "update_rule" },
+  { name: "contexa_delete_rule", description: "AI: delete a rule.", mapsTo: "delete_rule" },
+  { name: "contexa_add_skill", description: "AI: add a reusable skill.", mapsTo: "create_skill" },
+  { name: "contexa_update_skill", description: "AI: replace a skill.", mapsTo: "update_skill" },
+  { name: "contexa_delete_skill", description: "AI: delete a skill.", mapsTo: "delete_skill" },
+  { name: "contexa_add_project", description: "AI: create a project.", mapsTo: "create_project" },
+  { name: "contexa_update_project", description: "AI: rename / re-describe a project.", mapsTo: "update_project" },
+  { name: "contexa_delete_project", description: "AI: delete a project.", mapsTo: "delete_project" },
+  { name: "contexa_add_personal", description: "AI: store a personal entry (stays local).", mapsTo: "create_personal" },
+  { name: "contexa_update_personal", description: "AI: replace a personal entry.", mapsTo: "update_personal" },
+  { name: "contexa_delete_personal", description: "AI: delete a personal entry.", mapsTo: "delete_personal" },
+  { name: "contexa_link", description: "AI: relate two entities (project uses skill…).", mapsTo: "create_connection" },
+  { name: "contexa_unlink", description: "AI: remove a relation.", mapsTo: "delete_connection" },
+  { name: "contexa_scan_project", description: "AI: import agent instruction files from the project folder.", mapsTo: "scan_project_files" },
 ];
 
 const mcpClientConfig = (path: string) => JSON.stringify({
   mcpServers: {
-    simplememory: {
-      command: "<path-to>\\simplememory-mcp.exe",
-      env: { SIMPLEMEMORY_DB: path },
+    contexa: {
+      command: "<path-to>\\contexa-mcp.exe",
+      env: { CONTEXA_DB: path },
     },
   },
 }, null, 2);
@@ -52,8 +48,6 @@ export function Settings() {
   const toast = useApp((s) => s.toast);
   const refreshStats = useApp((s) => s.refreshStats);
   const stats = useApp((s) => s.stats);
-  const aiProvider = useApp((s) => s.aiProvider);
-  const setAiProvider = useApp((s) => s.setAiProvider);
   const [dbInfo, setDbInfo] = useState<DbInfo | null>(null);
   const clientConfig = mcpClientConfig(dbInfo?.path ?? "<database path>");
   const [density, setDensity] = useState("comfortable");
@@ -62,21 +56,10 @@ export function Settings() {
   const [ctxQuery, setCtxQuery] = useState("");
   const [ctxOut, setCtxOut] = useState<string | null>(null);
   const [ctxLoading, setCtxLoading] = useState(false);
-  const [updateBusy, setUpdateBusy] = useState(false);
-  const [updateStatus, setUpdateStatus] = useState("Updates are checked only when you request them.");
-  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
-  const [dlProgress, setDlProgress] = useState<number | null>(null);
-  const [dlDone, setDlDone] = useState(false);
-  const [dlError, setDlError] = useState("");
-  const [curVersion, setCurVersion] = useState("");
-  const updateRef = useRef<Update | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => () => { updateRef.current?.close().catch(() => {}); }, []);
 
   useEffect(() => {
     api.dbInfo().then(setDbInfo).catch(() => {});
-    getVersion().then(setCurVersion).catch(() => {});
     api.projects.list(undefined, 200, 0).then((p) => {
       setProjects(p.items);
       if (p.items[0]) setCtxProject((cur) => cur || p.items[0].name);
@@ -96,55 +79,6 @@ export function Settings() {
       await api.settings.set("density", v);
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "Failed to save preference");
-    }
-  };
-
-  const checkUpdate = async () => {
-    setUpdateBusy(true);
-    setUpdateStatus("Checking GitHub Releases…");
-    try {
-      const previous = updateRef.current;
-      updateRef.current = null;
-      await previous?.close().catch(() => {});
-      updateRef.current = await check();
-      if (updateRef.current) {
-        setPendingUpdate(updateRef.current);
-        setDlProgress(null);
-        setDlDone(false);
-        setDlError("");
-        setUpdateStatus(`Version ${updateRef.current.version} is available.`);
-      } else {
-        setUpdateStatus("You have the latest version.");
-        toast("success", "You have the latest version");
-      }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      setUpdateStatus(message.includes("404") ? "No release has been published yet." : message);
-      toast("error", message.includes("404") ? "No release published yet" : message);
-    } finally {
-      setUpdateBusy(false);
-    }
-  };
-
-  const downloadUpdate = async () => {
-    if (!updateRef.current) return;
-    setUpdateBusy(true);
-    setDlError("");
-    let downloaded = 0;
-    let total = 0;
-    try {
-      await updateRef.current.downloadAndInstall((event) => {
-        if (event.event === "Started") total = event.data.contentLength ?? 0;
-        if (event.event === "Progress") downloaded += event.data.chunkLength;
-        setDlProgress(total ? Math.round((downloaded / total) * 100) : null);
-      });
-      setDlDone(true);
-      setDlProgress(100);
-      setUpdateStatus("Update installed. Restart Contexta.");
-    } catch (e) {
-      setDlError(e instanceof Error ? e.message : "Update failed.");
-    } finally {
-      setUpdateBusy(false);
     }
   };
 
@@ -209,10 +143,10 @@ export function Settings() {
 
   const copyMcpSpec = async () => {
     const spec = {
-      transport: "stdio (simplememory-mcp binary)",
+      transport: "stdio (contexa-mcp binary)",
       tools: MCP_TOOLS.map((t) => ({ name: t.name, description: t.description, mapsTo: t.mapsTo })),
       example: {
-        tool: "simplememory_get_project_context",
+        tool: "contexa_get_project_context",
         input: { project: "Axiom", query: "How should I implement authentication?", max_results: 10 },
       },
     };
@@ -228,12 +162,7 @@ export function Settings() {
     <div className="page settings-page">
       <div className="page-head">
         <h1>Settings</h1>
-        <div className="sub">Choose your AI, adjust the interface and manage local data.</div>
-      </div>
-
-      <div className="section">
-        <div className="section-head"><span className="section-title">AI provider</span></div>
-        <AIProviderPicker value={aiProvider ?? null} onSaved={setAiProvider} />
+        <div className="sub">Adjust the interface and manage local data.</div>
       </div>
 
       <div className="section">
@@ -249,30 +178,6 @@ export function Settings() {
           <div className="kv"><span className="k">Theme</span><span className="mono-dim">Dark</span></div>
         </div>
       </div>
-
-      <div className="section">
-        <div className="section-head"><span className="section-title">Updates</span></div>
-        <div className="card">
-          <div className="toolbar" style={{ alignItems: "center", marginBottom: 4 }}>
-            <button className="btn sm" onClick={checkUpdate} disabled={updateBusy}>Check for updates</button>
-          </div>
-          <div className="mono-dim" role="status">{updateStatus}</div>
-        </div>
-      </div>
-      <UpdateModal
-        open={pendingUpdate !== null}
-        currentVersion={curVersion}
-        newVersion={pendingUpdate?.version ?? ""}
-        notes={(pendingUpdate?.body ?? "").slice(0, 1200)}
-        busy={updateBusy}
-        progress={dlProgress}
-        done={dlDone}
-        error={dlError}
-        onDownload={downloadUpdate}
-        onClose={() => {
-          if (!updateBusy) setPendingUpdate(null);
-        }}
-      />
 
       <div className="section">
         <div className="section-head"><span className="section-title">Database</span></div>
@@ -329,7 +234,7 @@ export function Settings() {
         <div className="card">
           <p className="mono-dim" style={{ marginTop: 0 }}>
             <Plug size={12} style={{ display: "inline", verticalAlign: -1 }} /> Model Context Protocol over stdio —
-            read <em>and</em> write. Build: <span className="code">cargo build --release --bin simplememory-mcp</span>,
+            read <em>and</em> write. Build: <span className="code">cargo build --release --bin contexa-mcp</span>,
             then point any MCP client at the exe. No HTTP server, no network.
           </p>
           <div className="md-preview" style={{ marginBottom: 10 }}>{clientConfig}</div>

@@ -24,6 +24,7 @@ function level(count: number): string {
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function ActivityHeatmap({ days }: { days: ActivityDay[] }) {
+  const [hovered, setHovered] = useState<{ date: string; count: number } | null>(null);
   const { weeks, months, total } = useMemo(() => {
     const counts = new Map(days.map((d) => [d.date, d.count]));
     const today = new Date();
@@ -63,16 +64,19 @@ function ActivityHeatmap({ days }: { days: ActivityDay[] }) {
 
   return (
     <div>
-      <div className="heat">
-        <div className="heat-daylabels" aria-hidden="true">
-          {["Mon", "", "Wed", "", "Fri", "", ""].map((l, i) => (
-            <span key={i}>{l}</span>
-          ))}
-        </div>
-        <div className="heat-main">
+      <div className="heat-dist">
+        <div className="heat-r">
+          <div className="heat-gutter" aria-hidden="true" />
           <div className="heat-months" aria-hidden="true">
             {months.map((m, i) => (
               <span key={i}>{m ?? ""}</span>
+            ))}
+          </div>
+        </div>
+        <div className="heat-r">
+          <div className="heat-gutter heat-daylabels" aria-hidden="true">
+            {["Mon", "", "Wed", "", "Fri", "", ""].map((l, i) => (
+              <span key={i}>{l}</span>
             ))}
           </div>
           <div className="heat-grid" role="img" aria-label={`${total} contributions in the last year`}>
@@ -85,6 +89,8 @@ function ActivityHeatmap({ days }: { days: ActivityDay[] }) {
                       className="heat-cell"
                       style={{ background: level(cell.count) }}
                       title={`${cell.count} contribution${cell.count === 1 ? "" : "s"} on ${cell.date}`}
+                      onMouseEnter={() => setHovered(cell)}
+                      onMouseLeave={() => setHovered(null)}
                     />
                   ) : (
                     <span key={di} className="heat-cell heat-future" />
@@ -96,7 +102,11 @@ function ActivityHeatmap({ days }: { days: ActivityDay[] }) {
         </div>
       </div>
       <div className="heat-legend">
-        <span>{total} contributions in the last year</span>
+        <span>
+          {hovered
+            ? `${hovered.count} contribution${hovered.count === 1 ? "" : "s"} on ${hovered.date}`
+            : `${total} contributions in the last year`}
+        </span>
         <span className="heat-scale">
           Less
           {[0, 1, 4, 7, 12].map((c) => (

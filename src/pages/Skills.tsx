@@ -32,8 +32,8 @@ export function Skills() {
 
   useEffect(() => {
     const onChange = () => load(query);
-    window.addEventListener("simplememory:changed", onChange);
-    return () => window.removeEventListener("simplememory:changed", onChange);
+    window.addEventListener("contexa:changed", onChange);
+    return () => window.removeEventListener("contexa:changed", onChange);
   }, [load, query]);
 
   const onQuery = (q: string) => {

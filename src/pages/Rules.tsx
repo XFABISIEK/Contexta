@@ -35,8 +35,8 @@ export function Rules() {
 
   useEffect(() => {
     const onChange = () => load(projectId);
-    window.addEventListener("simplememory:changed", onChange);
-    return () => window.removeEventListener("simplememory:changed", onChange);
+    window.addEventListener("contexa:changed", onChange);
+    return () => window.removeEventListener("contexa:changed", onChange);
   }, [load, projectId]);
 
   const toggle = async (r: Rule) => {

@@ -78,8 +78,12 @@ export function App() {
 
   // Global shortcuts: Ctrl+K / Ctrl+P palette, Ctrl+Shift+F search.
   useEffect(() => {
+    const views = ["dashboard", "projects", "memories", "rules", "skills", "graph"] as const;
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
+      const typing = !!(e.target as HTMLElement | null)?.closest?.(
+        "input, textarea, select, [contenteditable]",
+      );
       if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
         useApp.getState().setPalette(!useApp.getState().paletteOpen);
@@ -92,6 +96,19 @@ export function App() {
       } else if (e.key === "Escape") {
         useApp.getState().setPalette(false);
         useApp.getState().setSearch(false);
+      } else if (mod && e.key.toLowerCase() === "n" && !typing) {
+        // New memory from anywhere.
+        e.preventDefault();
+        useApp.getState().setComposer({ kind: "memory" });
+      } else if (e.altKey && !mod && !typing && /^[1-6]$/.test(e.key)) {
+        // Alt+1..6 jumps between main views.
+        e.preventDefault();
+        useApp.getState().go(views[Number(e.key) - 1]);
+      } else if (useApp.getState().view === "graph" && !typing && (e.key === "+" || e.key === "=" || e.key === "-" || e.key === "0")) {
+        // Graph zoom controls: + in, - out, 0 fit.
+        e.preventDefault();
+        const detail = e.key === "0" ? "fit" : e.key === "-" ? "out" : "in";
+        window.dispatchEvent(new CustomEvent("contexa:graph-zoom", { detail }));
       }
     };
     window.addEventListener("keydown", onKey);

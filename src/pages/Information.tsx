@@ -54,7 +54,7 @@ export function Information() {
       <div className="section">
         <div className="section-head"><span className="section-title">Privacy</span></div>
         <div className="card">
-          <div className="kv"><span className="k"><ShieldCheck size={13} /></span><span>No cloud sync, telemetry or analytics. Update checks contact GitHub on request.</span></div>
+          <div className="kv"><span className="k"><ShieldCheck size={13} /></span><span>No cloud sync, telemetry or analytics. Everything stays on this machine.</span></div>
           <div className="kv"><span className="k">Storage</span><span className="mono-dim">Your data is stored in one local SQLite database.</span></div>
         </div>
       </div>

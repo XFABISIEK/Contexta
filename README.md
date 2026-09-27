@@ -44,7 +44,7 @@ React UI  →  Tauri IPC  →  Rust services  →  SQLite (WAL)
 - **Global search** (`Ctrl+Shift+F`) — SQLite FTS5 grouped by entity type
 - **Command palette** (`Ctrl+K`) — navigation + creation shortcuts
 - **AI integration** — 12 AI providers with brand icons, project context preview (JSON + Markdown), copyable MCP tool spec
-- **MCP server** — standalone `simplememory-mcp` stdio binary with 25 read/write tools
+- **MCP server** — standalone `contexa-mcp` stdio binary with 26 read/write tools
 - **Local-first** — SQLite (WAL), portable storage location, `VACUUM INTO` backups, JSON export/import
 - **Auto-updates** — signed NSIS bundles checked on demand from GitHub releases
 
@@ -166,19 +166,19 @@ repos.rs (CRUD, pagination, tags, export/import) · db.rs (connection, migration
 Transport is **stdio** via the standalone binary — no public HTTP server:
 
 ```bash
-cargo build --release --bin simplememory-mcp
+cargo build --release --bin contexa-mcp
 ```
 
 Point any MCP client (Claude Desktop, Cursor, …) at the exe, optionally with
-`SIMPLEMEMORY_DB` pointing at the app database. Without it, the MCP binary reads
+`CONTEXA_DB` pointing at the app database. Without it, the MCP binary reads
 the selected storage location from `storage.json` (or uses the default path).
 
 ```json
 {
   "mcpServers": {
-    "simplememory": {
-      "command": "<path-to>\\simplememory-mcp.exe",
-      "env": { "SIMPLEMEMORY_DB": "<appdata>\\com.simplememory.app\\simplememory.db" }
+    "contexa": {
+      "command": "<path-to>\\contexa-mcp.exe",
+      "env": { "CONTEXA_DB": "<appdata>\\com.simplememory.app\\simplememory.db" }
     }
   }
 }
@@ -189,24 +189,24 @@ The bundled Ponytail skill icon is licensed under MIT; its notice is in
 
 Read tools (context retrieval):
 
-- `simplememory_search` → `search_everything`
-- `simplememory_get_project` → `get_project`
-- `simplememory_get_project_context` → `get_project_context`
-- `simplememory_get_rules` → `list_rules`
-- `simplememory_get_memories` → `list_memories`
-- `simplememory_get_skills` → `list_skills`
-- `simplememory_get_personal_context` → personal-scoped search
-- `simplememory_get_graph` → `get_graph`
+- `contexa_search` → `search_everything`
+- `contexa_get_project` → `get_project`
+- `contexa_get_project_context` → `get_project_context`
+- `contexa_get_rules` → `list_rules`
+- `contexa_get_memories` → `list_memories`
+- `contexa_get_skills` → `list_skills`
+- `contexa_get_personal_context` → personal-scoped search
+- `contexa_get_graph` → `get_graph`
 
 Write tools (AI can store and curate memory, same validation as the UI):
 
-- `simplememory_add_memory` / `_update_memory` / `_delete_memory`
-- `simplememory_add_rule` / `_update_rule` / `_delete_rule`
-- `simplememory_add_skill` / `_update_skill` / `_delete_skill`
-- `simplememory_add_project` / `_update_project` / `_delete_project`
-- `simplememory_add_personal` / `_update_personal` / `_delete_personal`
-- `simplememory_link` / `simplememory_unlink`
-- `simplememory_scan_project` (imports AGENTS.md, CLAUDE.md, Cursor rules… from the project folder)
+- `contexa_add_memory` / `_update_memory` / `_delete_memory`
+- `contexa_add_rule` / `_update_rule` / `_delete_rule`
+- `contexa_add_skill` / `_update_skill` / `_delete_skill`
+- `contexa_add_project` / `_update_project` / `_delete_project`
+- `contexa_add_personal` / `_update_personal` / `_delete_personal`
+- `contexa_link` / `contexa_unlink`
+- `contexa_scan_project` (imports AGENTS.md, CLAUDE.md, Cursor rules… from the project folder)
 
 The full tool spec (names, JSON schemas, example I/O) is copyable from
 Settings → MCP, alongside a client config snippet.
@@ -241,6 +241,9 @@ Contexa/
 
 - `Ctrl+K` / `Ctrl+P` — command palette
 - `Ctrl+Shift+F` — global search (FTS5)
+- `Ctrl+N` — new memory
+- `Alt+1..6` — dashboard, projects, memories, rules, skills, graph
+- `+` / `-` / `0` (in graph) — zoom in, zoom out, fit view
 - `Esc` — close dialogs
 
 ## Privacy

@@ -77,10 +77,10 @@ function GraphControls({ selectedId }: { selectedId: string | null }) {
   const { fitView, setCenter, getNode, zoomIn, zoomOut } = useReactFlow();
   return (
     <>
-      <button className="btn sm" onClick={() => zoomIn({ duration: 200 })} title="Zoom in">
+      <button className="btn sm" onClick={() => zoomIn({ duration: 200 })} title="Zoom in (+)">
         <ZoomIn />
       </button>
-      <button className="btn sm" onClick={() => zoomOut({ duration: 200 })} title="Zoom out">
+      <button className="btn sm" onClick={() => zoomOut({ duration: 200 })} title="Zoom out (-)">
         <ZoomOut />
       </button>
       <button className="btn sm" onClick={() => fitView({ padding: 0.2, duration: 200 })}>
@@ -100,8 +100,23 @@ function GraphControls({ selectedId }: { selectedId: string | null }) {
   );
 }
 
-function FitGraph({ layoutKey }: { layoutKey: string }) {
-  const { fitView } = useReactFlow();
+/** Keyboard zoom from the app shell: "+" in, "-" out, "0" fit. */
+function GraphZoomKeys() {
+  const { zoomIn, zoomOut, fitView } = useReactFlow();
+  useEffect(() => {
+    const onZoom = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail === "in") zoomIn({ duration: 200 });
+      else if (detail === "out") zoomOut({ duration: 200 });
+      else fitView({ padding: 0.25, duration: 200 });
+    };
+    window.addEventListener("contexa:graph-zoom", onZoom);
+    return () => window.removeEventListener("contexa:graph-zoom", onZoom);
+  }, [zoomIn, zoomOut, fitView]);
+  return null;
+}
+
+function FitGraph({ layoutKey }: { layoutKey: string }) {  const { fitView } = useReactFlow();
   const initialized = useNodesInitialized();
   useEffect(() => {
     if (!initialized) return;
@@ -143,8 +158,8 @@ export function GraphView({ projectId }: { projectId?: string }) {
 
   useEffect(() => {
     const onChange = () => load();
-    window.addEventListener("simplememory:changed", onChange);
-    return () => window.removeEventListener("simplememory:changed", onChange);
+    window.addEventListener("contexa:changed", onChange);
+    return () => window.removeEventListener("contexa:changed", onChange);
   }, [load]);
 
   const visible = useMemo(() => {
@@ -409,6 +424,7 @@ function FlowCanvas({
     >
       <Background gap={24} size={1.5} color="#24282e" />
       <FitGraph layoutKey={layoutKey} />
+      <GraphZoomKeys />
       <Panel position="bottom-left" className="graph-panel">
         <GraphControls selectedId={selectedId} />
       </Panel>

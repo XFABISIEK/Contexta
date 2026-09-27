@@ -324,7 +324,7 @@ pub fn import_project(state: State<'_, AppState>, json: String) -> Result<Import
 #[tauri::command]
 pub fn backup_database(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     let dir = crate::backup_dir(&app)?;
-    let name = format!("simplememory-{}.db", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
+    let name = format!("contexta-{}.db", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
     let dest: PathBuf = dir.join(name);
     crate::repos::backup_db(&lock(&state), &dest)?;
     Ok(dest.to_string_lossy().to_string())

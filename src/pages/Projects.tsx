@@ -53,8 +53,8 @@ export function Projects() {
 
   useEffect(() => {
     const onChange = () => load();
-    window.addEventListener("simplememory:changed", onChange);
-    return () => window.removeEventListener("simplememory:changed", onChange);
+    window.addEventListener("contexa:changed", onChange);
+    return () => window.removeEventListener("contexa:changed", onChange);
   }, [load]);
 
   if (selectedId) {
@@ -177,8 +177,8 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }) {
   useEffect(() => {
     load();
     const onChange = () => load();
-    window.addEventListener("simplememory:changed", onChange);
-    return () => window.removeEventListener("simplememory:changed", onChange);
+    window.addEventListener("contexa:changed", onChange);
+    return () => window.removeEventListener("contexa:changed", onChange);
   }, [load]);
 
   const linkSkill = async () => {

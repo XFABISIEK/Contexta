@@ -3,8 +3,8 @@
 //! Lets any MCP-compatible AI client read AND write the local knowledge base:
 //!
 //! ```bash
-//! cargo build --release --bin simplememory-mcp
-//! SIMPLEMEMORY_DB="%APPDATA%/com.simplememory.app/simplememory.db" simplememory-mcp
+//! cargo build --release --bin contexa-mcp
+//! CONTEXA_DB="%APPDATA%/com.simplememory.app/simplememory.db" contexa-mcp
 //! ```
 //!
 //! Protocol: newline-delimited JSON-RPC 2.0 over stdin/stdout
@@ -21,9 +21,12 @@ use std::path::PathBuf;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn db_path() -> PathBuf {
-    if let Ok(p) = std::env::var("SIMPLEMEMORY_DB") {
-        if !p.trim().is_empty() {
-            return PathBuf::from(p);
+    // CONTEXA_DB is current; SIMPLEMEMORY_DB still works for older configs.
+    for key in ["CONTEXA_DB", "SIMPLEMEMORY_DB"] {
+        if let Ok(p) = std::env::var(key) {
+            if !p.trim().is_empty() {
+                return PathBuf::from(p);
+            }
         }
     }
     #[cfg(target_os = "windows")]
@@ -72,74 +75,74 @@ fn tools_list() -> Value {
     let project_prop = json!({"type": "string", "description": "Project id or name (memories/rules) / name (context)"});
     json!([
         // ---- read ----
-        t("simplememory_search", "Hybrid FTS search across projects, memories, rules, skills and personal info.",
+        t("contexa_search", "Hybrid FTS search across projects, memories, rules, skills and personal info.",
             schema(json!({"query": {"type": "string"}, "entity_types": {"type": "array", "items": {"type": "string"}},
                 "project_id": {"type": "string"}, "limit": {"type": "integer"}, "offset": {"type": "integer"}}), &["query"])),
-        t("simplememory_get_project", "Fetch one project by id or name.",
+        t("contexa_get_project", "Fetch one project by id or name.",
             schema(json!({"project": {"type": "string"}}), &["project"])),
-        t("simplememory_get_project_context", "Assemble optimized AI context: critical rules first, ranked memories, skills, conditional personal info, token-budgeted markdown.",
+        t("contexa_get_project_context", "Assemble optimized AI context: critical rules first, ranked memories, skills, conditional personal info, token-budgeted markdown.",
             schema(json!({"project": project_prop, "query": {"type": "string"}, "max_results": {"type": "integer"}, "max_tokens": {"type": "integer"}}), &["project"])),
-        t("simplememory_get_rules", "List rules (critical first). Filter by project.",
+        t("contexa_get_rules", "List rules (critical first). Filter by project.",
             schema(json!({"project_id": {"type": "string"}, "limit": {"type": "integer"}}), &[])),
-        t("simplememory_get_memories", "Ranked memory retrieval with project/type/priority/query filters.",
+        t("contexa_get_memories", "Ranked memory retrieval with project/type/priority/query filters.",
             schema(json!({"project_id": {"type": "string"}, "memory_type": {"type": "string"}, "priority": priority_prop,
                 "query": {"type": "string"}, "limit": {"type": "integer"}}), &[])),
-        t("simplememory_get_skills", "List skills by keyword/category.",
+        t("contexa_get_skills", "List skills by keyword/category.",
             schema(json!({"query": {"type": "string"}, "category": {"type": "string"}}), &[])),
-        t("simplememory_get_personal_context", "Personal info matching a query (only returned on match, stays local).",
+        t("contexa_get_personal_context", "Personal info matching a query (only returned on match, stays local).",
             schema(json!({"query": {"type": "string"}}), &["query"])),
-        t("simplememory_get_graph", "Relation graph: capped, priority-sampled nodes + explicit and belongs_to edges.",
+        t("contexa_get_graph", "Relation graph: capped, priority-sampled nodes + explicit and belongs_to edges.",
             schema(json!({"entity_types": {"type": "array", "items": {"type": "string"}}, "project_id": {"type": "string"}, "limit": {"type": "integer"}}), &[])),
         // ---- write: projects ----
-        t("simplememory_add_project", "Create a project.",
+        t("contexa_add_project", "Create a project.",
             schema(json!({"name": {"type": "string"}, "description": {"type": "string"}, "path": {"type": "string"}}), &["name"])),
-        t("simplememory_update_project", "Rename / re-describe a project (by id).",
+        t("contexa_update_project", "Rename / re-describe a project (by id).",
             schema(json!({"id": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "path": {"type": "string"}}), &["id", "name"])),
-        t("simplememory_delete_project", "Delete a project (memories detach, rules cascade).",
+        t("contexa_delete_project", "Delete a project (memories detach, rules cascade).",
             schema(json!({"id": {"type": "string"}}), &["id"])),
         // ---- write: memories ----
-        t("simplememory_add_memory", "Store a memory. Priority controls AI-context inclusion (critical always in).",
+        t("contexa_add_memory", "Store a memory. Priority controls AI-context inclusion (critical always in).",
             schema(json!({"title": {"type": "string"}, "content": {"type": "string"}, "project_id": {"type": "string"},
                 "memory_type": {"type": "string", "enum": ["fact", "decision", "note", "reference", "todo"]},
                 "priority": priority_prop, "source": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}}), &["title"])),
-        t("simplememory_update_memory", "Patch a memory by id (only given fields change; tags replace).",
+        t("contexa_update_memory", "Patch a memory by id (only given fields change; tags replace).",
             schema(json!({"id": {"type": "string"}, "title": {"type": "string"}, "content": {"type": "string"},
                 "project_id": {"type": ["string", "null"]}, "memory_type": {"type": "string"}, "priority": priority_prop,
                 "source": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}}), &["id"])),
-        t("simplememory_delete_memory", "Delete a memory by id.",
+        t("contexa_delete_memory", "Delete a memory by id.",
             schema(json!({"id": {"type": "string"}}), &["id"])),
         // ---- write: rules ----
-        t("simplememory_add_rule", "Add a rule (project-scoped or global when project_id omitted).",
+        t("contexa_add_rule", "Add a rule (project-scoped or global when project_id omitted).",
             schema(json!({"title": {"type": "string"}, "content": {"type": "string"}, "project_id": {"type": "string"},
                 "priority": priority_prop, "enabled": {"type": "boolean"}}), &["title"])),
-        t("simplememory_update_rule", "Replace a rule by id.",
+        t("contexa_update_rule", "Replace a rule by id.",
             schema(json!({"id": {"type": "string"}, "title": {"type": "string"}, "content": {"type": "string"},
                 "priority": priority_prop, "enabled": {"type": "boolean"}}), &["id", "title"])),
-        t("simplememory_delete_rule", "Delete a rule by id.",
+        t("contexa_delete_rule", "Delete a rule by id.",
             schema(json!({"id": {"type": "string"}}), &["id"])),
         // ---- write: skills ----
-        t("simplememory_add_skill", "Add a reusable skill.",
+        t("contexa_add_skill", "Add a reusable skill.",
             schema(json!({"name": {"type": "string"}, "description": {"type": "string"}, "content": {"type": "string"}, "category": {"type": "string"}}), &["name"])),
-        t("simplememory_update_skill", "Replace a skill by id.",
+        t("contexa_update_skill", "Replace a skill by id.",
             schema(json!({"id": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "content": {"type": "string"}, "category": {"type": "string"}}), &["id", "name"])),
-        t("simplememory_delete_skill", "Delete a skill by id.",
+        t("contexa_delete_skill", "Delete a skill by id.",
             schema(json!({"id": {"type": "string"}}), &["id"])),
         // ---- write: personal ----
-        t("simplememory_add_personal", "Store a personal entry (stays local).",
+        t("contexa_add_personal", "Store a personal entry (stays local).",
             schema(json!({"key": {"type": "string"}, "title": {"type": "string"}, "content": {"type": "string"}}), &["key", "title"])),
-        t("simplememory_update_personal", "Replace a personal entry by id.",
+        t("contexa_update_personal", "Replace a personal entry by id.",
             schema(json!({"id": {"type": "string"}, "key": {"type": "string"}, "title": {"type": "string"}, "content": {"type": "string"}}), &["id", "key", "title"])),
-        t("simplememory_delete_personal", "Delete a personal entry by id.",
+        t("contexa_delete_personal", "Delete a personal entry by id.",
             schema(json!({"id": {"type": "string"}}), &["id"])),
         // ---- write: links ----
-        t("simplememory_link", "Create a relation between two entities (e.g. project uses skill).",
+        t("contexa_link", "Create a relation between two entities (e.g. project uses skill).",
             schema(json!({"source_id": {"type": "string"}, "source_type": {"type": "string"},
                 "target_id": {"type": "string"}, "target_type": {"type": "string"},
                 "relationship": {"type": "string"}, "weight": {"type": "number"}}),
                 &["source_id", "source_type", "target_id", "target_type"])),
-        t("simplememory_unlink", "Delete a relation by id.",
+        t("contexa_unlink", "Delete a relation by id.",
             schema(json!({"id": {"type": "string"}}), &["id"])),
-        t("simplememory_scan_project", "Read agent instruction files (AGENTS.md, CLAUDE.md, Cursor rules…) from the project's local folder into memories.",
+        t("contexa_scan_project", "Read agent instruction files (AGENTS.md, CLAUDE.md, Cursor rules…) from the project's local folder into memories.",
             schema(json!({"project": project_prop}), &["project"])),
     ])
 }
@@ -184,7 +187,7 @@ fn str_vec(v: &Value) -> Option<Vec<String>> {
 fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, String> {
     let args = if args.is_null() { &Value::Null } else { args };
     match name {
-        "simplememory_search" => {
+        "contexa_search" => {
             let p = search::SearchParams {
                 query: req(args, "query")?,
                 entity_types: args.get("entity_types").and_then(str_vec),
@@ -195,7 +198,7 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
             let (items, total) = search::search_hybrid(conn, &p, &[]).map_err(|e| e.to_string())?;
             Ok(text_result(json!({"results": items, "total": total})))
         }
-        "simplememory_get_project" => {
+        "contexa_get_project" => {
             let q = req(args, "project")?;
             let found = repos::get_project(conn, &q)
                 .map_err(|e| e.to_string())?
@@ -213,7 +216,7 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
                 });
             found.map(|p| text_result(json!(p))).ok_or_else(|| format!("project '{}' not found", q))
         }
-        "simplememory_get_project_context" => {
+        "contexa_get_project_context" => {
             let opts = context::ContextOptions {
                 project: req(args, "project")?,
                 query: s(args, "query").unwrap_or_default(),
@@ -223,24 +226,24 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
             let ctx = context::build_project_context(conn, &opts).map_err(|e| e.to_string())?;
             Ok(text_result(json!(ctx)))
         }
-        "simplememory_get_rules" => {
+        "contexa_get_rules" => {
             let page = repos::list_rules(conn, opt_str(args, "project_id"), opt_int(args, "limit"), Some(0))
                 .map_err(|e| e.to_string())?;
             Ok(text_result(json!(page)))
         }
-        "simplememory_get_memories" => {
+        "contexa_get_memories" => {
             let page = repos::list_memories(
                 conn, opt_str(args, "project_id"), opt_str(args, "memory_type"),
                 opt_str(args, "priority"), opt_str(args, "query"), opt_int(args, "limit"), Some(0),
             )?;
             Ok(text_result(json!(page)))
         }
-        "simplememory_get_skills" => {
+        "contexa_get_skills" => {
             let page = repos::list_skills(conn, opt_str(args, "query"), opt_str(args, "category"), Some(100), Some(0))
                 .map_err(|e| e.to_string())?;
             Ok(text_result(json!(page)))
         }
-        "simplememory_get_personal_context" => {
+        "contexa_get_personal_context" => {
             let p = search::SearchParams {
                 query: req(args, "query")?,
                 entity_types: Some(vec!["personal".to_string()]),
@@ -249,7 +252,7 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
             let (items, _) = search::search_hybrid(conn, &p, &[]).map_err(|e| e.to_string())?;
             Ok(text_result(json!({"results": items})))
         }
-        "simplememory_get_graph" => {
+        "contexa_get_graph" => {
             let f = graph::GraphFilter {
                 entity_types: args.get("entity_types").and_then(str_vec),
                 project_id: opt_str(args, "project_id"),
@@ -258,23 +261,23 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
             let g = graph::get_graph(conn, &f).map_err(|e| e.to_string())?;
             Ok(text_result(json!(g)))
         }
-        "simplememory_add_project" => {
+        "contexa_add_project" => {
             let p = repos::create_project(conn, models::NewProject {
                 name: req(args, "name")?, description: s(args, "description"), path: opt_str(args, "path"),
             })?;
             Ok(text_result(json!(p)))
         }
-        "simplememory_update_project" => {
+        "contexa_update_project" => {
             let p = repos::update_project(conn, &req(args, "id")?, models::NewProject {
                 name: req(args, "name")?, description: s(args, "description"), path: opt_str(args, "path"),
             })?;
             Ok(text_result(json!(p)))
         }
-        "simplememory_delete_project" => {
+        "contexa_delete_project" => {
             repos::delete_project(conn, &req(args, "id")?)?;
             Ok(text_result(json!({"deleted": true})))
         }
-        "simplememory_add_memory" => {
+        "contexa_add_memory" => {
             let m = repos::create_memory(conn, models::NewMemory {
                 project_id: opt_str(args, "project_id"),
                 title: req(args, "title")?,
@@ -286,7 +289,7 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
             })?;
             Ok(text_result(json!(m)))
         }
-        "simplememory_update_memory" => {
+        "contexa_update_memory" => {
             let project_id = match args.get("project_id") {
                 None => None,
                 Some(Value::Null) => Some(None),
@@ -303,11 +306,11 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
             })?;
             Ok(text_result(json!(m)))
         }
-        "simplememory_delete_memory" => {
+        "contexa_delete_memory" => {
             repos::delete_memory(conn, &req(args, "id")?)?;
             Ok(text_result(json!({"deleted": true})))
         }
-        "simplememory_add_rule" => {
+        "contexa_add_rule" => {
             let r = repos::create_rule(conn, models::NewRule {
                 project_id: opt_str(args, "project_id"),
                 title: req(args, "title")?,
@@ -317,7 +320,7 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
             })?;
             Ok(text_result(json!(r)))
         }
-        "simplememory_update_rule" => {
+        "contexa_update_rule" => {
             let r = repos::update_rule(conn, &req(args, "id")?, models::NewRule {
                 project_id: opt_str(args, "project_id"),
                 title: req(args, "title")?,
@@ -327,11 +330,11 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
             })?;
             Ok(text_result(json!(r)))
         }
-        "simplememory_delete_rule" => {
+        "contexa_delete_rule" => {
             repos::delete_rule(conn, &req(args, "id")?)?;
             Ok(text_result(json!({"deleted": true})))
         }
-        "simplememory_add_skill" => {
+        "contexa_add_skill" => {
             let sk = repos::create_skill(conn, models::NewSkill {
                 name: req(args, "name")?,
                 description: s(args, "description"),
@@ -341,7 +344,7 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
             })?;
             Ok(text_result(json!(sk)))
         }
-        "simplememory_update_skill" => {
+        "contexa_update_skill" => {
             let sk = repos::update_skill(conn, &req(args, "id")?, models::NewSkill {
                 name: req(args, "name")?,
                 description: s(args, "description"),
@@ -351,11 +354,11 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
             })?;
             Ok(text_result(json!(sk)))
         }
-        "simplememory_delete_skill" => {
+        "contexa_delete_skill" => {
             repos::delete_skill(conn, &req(args, "id")?)?;
             Ok(text_result(json!({"deleted": true})))
         }
-        "simplememory_add_personal" => {
+        "contexa_add_personal" => {
             let p = repos::create_personal(conn, models::NewPersonalInfo {
                 key: req(args, "key")?,
                 title: req(args, "title")?,
@@ -363,7 +366,7 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
             })?;
             Ok(text_result(json!(p)))
         }
-        "simplememory_update_personal" => {
+        "contexa_update_personal" => {
             let p = repos::update_personal(conn, &req(args, "id")?, models::NewPersonalInfo {
                 key: req(args, "key")?,
                 title: req(args, "title")?,
@@ -371,11 +374,11 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
             })?;
             Ok(text_result(json!(p)))
         }
-        "simplememory_delete_personal" => {
+        "contexa_delete_personal" => {
             repos::delete_personal(conn, &req(args, "id")?)?;
             Ok(text_result(json!({"deleted": true})))
         }
-        "simplememory_link" => {
+        "contexa_link" => {
             let c = repos::create_connection(conn, models::NewConnection {
                 source_id: req(args, "source_id")?,
                 source_type: req(args, "source_type")?,
@@ -386,11 +389,11 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
             })?;
             Ok(text_result(json!(c)))
         }
-        "simplememory_unlink" => {
+        "contexa_unlink" => {
             repos::delete_connection(conn, &req(args, "id")?)?;
             Ok(text_result(json!({"deleted": true})))
         }
-        "simplememory_scan_project" => {
+        "contexa_scan_project" => {
             let q = req(args, "project")?;
             let id = match repos::get_project(conn, &q).map_err(|e| e.to_string())? {
                 Some(p) => p.id,
@@ -419,7 +422,7 @@ fn handle_message(conn: &Connection, msg: &Value) -> Option<Value> {
         "initialize" => Some(ok(&id, json!({
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "simplememory-mcp", "version": VERSION}
+            "serverInfo": {"name": "contexa-mcp", "version": VERSION}
         }))),
         "ping" => Some(ok(&id, json!({}))),
         "tools/list" => Some(ok(&id, json!({"tools": tools_list()}))),
@@ -495,17 +498,17 @@ mod tests {
             .map(|t| t["name"].as_str().unwrap().to_string())
             .collect();
         for must in [
-            "simplememory_search",
-            "simplememory_get_project_context",
-            "simplememory_add_memory",
-            "simplememory_update_memory",
-            "simplememory_delete_memory",
-            "simplememory_add_rule",
-            "simplememory_add_skill",
-            "simplememory_add_project",
-            "simplememory_add_personal",
-            "simplememory_link",
-            "simplememory_unlink",
+            "contexa_search",
+            "contexa_get_project_context",
+            "contexa_add_memory",
+            "contexa_update_memory",
+            "contexa_delete_memory",
+            "contexa_add_rule",
+            "contexa_add_skill",
+            "contexa_add_project",
+            "contexa_add_personal",
+            "contexa_link",
+            "contexa_unlink",
         ] {
             assert!(names.contains(&must.to_string()), "missing tool {}", must);
         }
@@ -516,25 +519,25 @@ mod tests {
         let conn = test_conn();
         let added = handle_call(
             &conn,
-            "simplememory_add_memory",
+            "contexa_add_memory",
             &json!({"title": "MCP roundtrip probe", "content": "written by the mcp test", "priority": "high"}),
         )
         .unwrap();
         let text = added["content"][0]["text"].as_str().unwrap();
         let id = serde_json::from_str::<Value>(text).unwrap()["id"].as_str().unwrap().to_string();
 
-        let found = handle_call(&conn, "simplememory_search", &json!({"query": "MCP roundtrip probe"})).unwrap();
+        let found = handle_call(&conn, "contexa_search", &json!({"query": "MCP roundtrip probe"})).unwrap();
         assert!(found["content"][0]["text"].as_str().unwrap().contains("MCP roundtrip probe"));
 
         let patched = handle_call(
-            &conn, "simplememory_update_memory",
+            &conn, "contexa_update_memory",
             &json!({"id": id, "priority": "low"}),
         )
         .unwrap();
         let ptext = patched["content"][0]["text"].as_str().unwrap();
         assert!(serde_json::from_str::<Value>(ptext).unwrap()["priority"] == "low");
 
-        handle_call(&conn, "simplememory_delete_memory", &json!({"id": id})).unwrap();
+        handle_call(&conn, "contexa_delete_memory", &json!({"id": id})).unwrap();
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM memories WHERE id = ?1", params![id], |r| r.get(0))
             .unwrap();
@@ -555,7 +558,7 @@ mod tests {
     fn mcp_context_tool_returns_markdown() {
         let conn = test_conn();
         let out = handle_call(
-            &conn, "simplememory_get_project_context",
+            &conn, "contexa_get_project_context",
             &json!({"project": "Axiom", "query": "auth", "max_results": 5}),
         )
         .unwrap();

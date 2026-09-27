@@ -24,8 +24,8 @@ export function Personal() {
   useEffect(() => {
     load();
     const onChange = () => load();
-    window.addEventListener("simplememory:changed", onChange);
-    return () => window.removeEventListener("simplememory:changed", onChange);
+    window.addEventListener("contexa:changed", onChange);
+    return () => window.removeEventListener("contexa:changed", onChange);
   }, [load]);
 
   const remove = (p: PersonalInfo) => {
