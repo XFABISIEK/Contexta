@@ -56,6 +56,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_dashboard_stats,
+            commands::activity_stats,
             commands::get_db_info,
             commands::get_storage_setup,
             commands::complete_storage_setup,
@@ -95,6 +96,7 @@ pub fn run() {
             commands::export_project,
             commands::import_project,
             commands::backup_database,
+            commands::scan_project_files,
             commands::seed_dev_data,
         ])
         .run(tauri::generate_context!())

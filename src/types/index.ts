@@ -79,6 +79,11 @@ export interface DashboardStats {
   personal: number;
 }
 
+export interface ActivityDay {
+  date: string;
+  count: number;
+}
+
 export interface SearchResult {
   entity_type: string;
   entity_id: string;
@@ -146,6 +151,13 @@ export interface ImportResult {
   rules: number;
 }
 
+export interface ScanResult {
+  scanned: number;
+  imported: number;
+  skipped: number;
+  files: string[];
+}
+
 export type View =
   | "dashboard"
   | "graph"
@@ -154,6 +166,7 @@ export type View =
   | "rules"
   | "skills"
   | "personal"
+  | "profile"
   | "information"
   | "settings";
 

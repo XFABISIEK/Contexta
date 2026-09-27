@@ -33,6 +33,28 @@ pub fn stats(conn: &Connection) -> rusqlite::Result<DashboardStats> {
     })
 }
 
+/// Creations per day over the last `days` days (for the Profile heatmap).
+/// Counts every stored entity; days without activity are filled client-side.
+pub fn activity(conn: &Connection, days: i64) -> rusqlite::Result<Vec<crate::models::ActivityDay>> {
+    let days = days.clamp(7, 730);
+    let mut stmt = conn.prepare(
+        "SELECT date(created_at) AS d, COUNT(*) FROM (
+            SELECT created_at FROM projects WHERE created_at >= date('now', ?1)
+            UNION ALL SELECT created_at FROM memories WHERE created_at >= date('now', ?1)
+            UNION ALL SELECT created_at FROM rules WHERE created_at >= date('now', ?1)
+            UNION ALL SELECT created_at FROM skills WHERE created_at >= date('now', ?1)
+            UNION ALL SELECT created_at FROM personal_information WHERE created_at >= date('now', ?1)
+            UNION ALL SELECT created_at FROM connections WHERE created_at >= date('now', ?1)
+        ) GROUP BY d ORDER BY d",
+    )?;
+    let window = format!("-{} days", days);
+    let rows = stmt.query_map(params![window], |r| {
+        Ok(crate::models::ActivityDay { date: r.get(0)?, count: r.get(1)? })
+    })?;
+    let out: Vec<crate::models::ActivityDay> = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(out)
+}
+
 // ---------- projects ----------
 
 pub fn list_projects(
@@ -849,4 +871,120 @@ pub fn backup_db(conn: &Connection, dest: &Path) -> Result<(), String> {
     let lit = dest.to_string_lossy().replace('\'', "''");
     conn.execute_batch(&format!("VACUUM INTO '{}';", lit)).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ---------- AI context file scan ----------
+
+/// Well-known agent instruction files (Codex, Claude Code, Cursor, …).
+const AI_CONTEXT_FILES: &[&str] = &[
+    "AGENTS.md",
+    "CLAUDE.md",
+    "MUSE.md",
+    "GEMINI.md",
+    "CODEX.md",
+    ".muserules",
+    ".cursorrules",
+    ".cursorindexignore",
+    ".github/muse-instructions.md",
+];
+
+/// Directories scanned one level deep for instruction files.
+const AI_CONTEXT_DIRS: &[&str] = &[".cursor/rules", ".codex", "agents"];
+
+fn ai_context_candidates(root: &Path) -> Vec<String> {
+    let mut rels: Vec<String> = Vec::new();
+    for f in AI_CONTEXT_FILES {
+        if root.join(f).is_file() {
+            rels.push(f.to_string());
+        }
+    }
+    for d in AI_CONTEXT_DIRS {
+        let dir = root.join(d);
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let fp = entry.path();
+            if !fp.is_file() {
+                continue;
+            }
+            let ext = fp
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            if ext == "md" || ext == "mdc" || ext == "txt" {
+                if let Ok(rel) = fp.strip_prefix(root) {
+                    rels.push(rel.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    rels.sort();
+    rels.dedup();
+    rels.truncate(50);
+    rels
+}
+
+/// Read agent instruction files from the project's local folder and store
+/// each as a `reference` memory. Skips missing, oversized, empty and
+/// already-imported files.
+pub fn scan_project_files(conn: &Connection, project_id: &str) -> Result<crate::models::ScanResult, String> {
+    let project = get_project(conn, project_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Project not found".to_string())?;
+    let dir = project.path.trim().to_string();
+    if dir.is_empty() {
+        return Err("Set the project folder first (Edit project → Local folder)".to_string());
+    }
+    let root = Path::new(&dir);
+    if !root.is_dir() {
+        return Err(format!("Project folder not found: {}", dir));
+    }
+    let mut imported = 0i64;
+    let mut skipped = 0i64;
+    let mut files: Vec<String> = Vec::new();
+    let rels = ai_context_candidates(root);
+    let scanned = rels.len() as i64;
+    for rel in rels {
+        let bytes = match std::fs::read(root.join(&rel)) {
+            Ok(b) if b.len() <= 100_000 => b,
+            _ => {
+                skipped += 1;
+                continue;
+            }
+        };
+        let text = String::from_utf8_lossy(&bytes).trim().to_string();
+        if text.is_empty() {
+            skipped += 1;
+            continue;
+        }
+        let title = format!("{}/{}", project.name, rel);
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM memories WHERE project_id = ?1 AND title = ?2",
+                params![project.id, title],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if exists > 0 {
+            skipped += 1;
+            continue;
+        }
+        create_memory(
+            conn,
+            NewMemory {
+                project_id: Some(project.id.clone()),
+                title,
+                content: text,
+                memory_type: Some("reference".to_string()),
+                priority: Some("normal".to_string()),
+                source: Some("import".to_string()),
+                tags: Some(vec!["ai-context".to_string()]),
+            },
+        )?;
+        imported += 1;
+        files.push(rel);
+    }
+    Ok(crate::models::ScanResult { scanned, imported, skipped, files })
 }

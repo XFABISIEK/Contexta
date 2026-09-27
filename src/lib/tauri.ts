@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ActivityDay,
   Connection,
   DashboardStats,
   DbInfo,
@@ -11,6 +12,7 @@ import type {
   Project,
   ProjectContext,
   Rule,
+  ScanResult,
   SearchResult,
   Skill,
   StorageSetupInfo,
@@ -31,6 +33,7 @@ export const api = {
     complete: (directory: string | null) => call<string>("complete_storage_setup", { directory }),
   },
   stats: () => call<DashboardStats>("get_dashboard_stats"),
+  activity: (days = 365) => call<ActivityDay[]>("activity_stats", { days }),
   dbInfo: () => call<DbInfo>("get_db_info"),
 
   projects: {
@@ -162,5 +165,6 @@ export const api = {
   exportProject: (id: string) => call<string>("export_project", { id }),
   importProject: (json: string) => call<ImportResult>("import_project", { json }),
   backup: () => call<string>("backup_database"),
+  scanProject: (projectId: string) => call<ScanResult>("scan_project_files", { projectId }),
   seed: () => call<string>("seed_dev_data"),
 };

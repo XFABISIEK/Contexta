@@ -50,6 +50,11 @@ pub fn get_dashboard_stats(state: State<'_, AppState>) -> Result<DashboardStats,
 }
 
 #[tauri::command]
+pub fn activity_stats(state: State<'_, AppState>, days: Option<i64>) -> Result<Vec<crate::models::ActivityDay>, String> {
+    crate::repos::activity(&lock(&state), days.unwrap_or(365)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn get_db_info(app: tauri::AppHandle) -> Result<DbInfo, String> {
     let path = db_path(&app)?;
     let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
@@ -329,4 +334,9 @@ pub fn backup_database(app: tauri::AppHandle, state: State<'_, AppState>) -> Res
 pub fn seed_dev_data(state: State<'_, AppState>) -> Result<String, String> {
     let mut conn = state.conn.lock().expect("database lock poisoned");
     crate::db::seed_dev_data(&mut conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn scan_project_files(state: State<'_, AppState>, project_id: String) -> Result<crate::models::ScanResult, String> {
+    crate::repos::scan_project_files(&lock(&state), &project_id)
 }

@@ -17,6 +17,7 @@ import { Memories } from "./pages/Memories";
 import { Rules } from "./pages/Rules";
 import { Skills } from "./pages/Skills";
 import { Personal } from "./pages/Personal";
+import { Profile } from "./pages/Profile";
 import { Settings } from "./pages/Settings";
 import { Information } from "./pages/Information";
 
@@ -129,6 +130,7 @@ export function App() {
               {view === "rules" && <Rules />}
               {view === "skills" && <Skills />}
               {view === "personal" && <Personal />}
+              {view === "profile" && <Profile />}
               {view === "information" && <Information />}
               {view === "settings" && <Settings />}
             </motion.div>

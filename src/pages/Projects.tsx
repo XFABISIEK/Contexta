@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Folder,
   FolderGit2,
+  FileSearch,
   Copy,
   Plus,
   Pencil,
@@ -146,6 +147,8 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const [allSkills, setAllSkills] = useState<Skill[]>([]);
   const [linkId, setLinkId] = useState("");
   const [connections, setConnections] = useState<Connection[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [scanMsg, setScanMsg] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -194,6 +197,21 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }) {
       load();
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "Link failed");
+    }
+  };
+
+  const scanFiles = async () => {
+    setScanning(true);
+    setScanMsg("");
+    try {
+      const r = await api.scanProject(id);
+      setScanMsg(`Scanned ${r.scanned} files — imported ${r.imported}, skipped ${r.skipped}.`);
+      toast("success", `Imported ${r.imported} AI context files`);
+      load();
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Scan failed");
+    } finally {
+      setScanning(false);
     }
   };
 
@@ -273,6 +291,24 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }) {
             <div className="stat-card">
               <div className="stat-label"><Wrench /> Skills</div>
               <div className="stat-value">{linkedSkills.length}</div>
+            </div>
+          </div>
+
+          <div className="section">
+            <div className="section-head"><span className="section-title">AI context files</span></div>
+            <div className="card">
+              <p className="mono-dim" style={{ marginTop: 0 }}>
+                Reads AGENTS.md, CLAUDE.md, Cursor rules and similar files from the project folder into memories.
+              </p>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button className="btn sm" onClick={scanFiles} disabled={scanning || !project.path}>
+                  <FileSearch size={14} /> {scanning ? "Scanning…" : "Scan project folder"}
+                </button>
+                {!project.path && (
+                  <span className="mono-dim">Set the project folder first (edit project → Local folder).</span>
+                )}
+                {scanMsg && <span className="mono-dim">{scanMsg}</span>}
+              </div>
             </div>
           </div>
 

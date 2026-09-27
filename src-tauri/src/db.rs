@@ -397,6 +397,40 @@ mod tests {
     }
 
     #[test]
+    fn activity_counts_seeded_entities() {
+        let mut conn = test_db();
+        seed_dev_data(&mut conn).unwrap();
+        let days = crate::repos::activity(&conn, 365).unwrap();
+        assert!(!days.is_empty());
+        let total: i64 = days.iter().map(|d| d.count).sum();
+        // 2 projects + 5 memories + 4 rules + 3 skills + 2 personal + 4 connections
+        assert!(total >= 19, "unexpected activity total {}", total);
+    }
+
+    #[test]
+    fn scan_project_files_imports_ai_context() {
+        let mut conn = test_db();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "# agent rules").unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "claude notes").unwrap();
+        std::fs::create_dir_all(dir.path().join(".cursor/rules")).unwrap();
+        std::fs::write(dir.path().join(".cursor/rules/shared.mdc"), "shared rules").unwrap();
+        let p = crate::repos::create_project(
+            &conn,
+            crate::models::NewProject {
+                name: "Scanned".into(),
+                description: None,
+                path: Some(dir.path().to_string_lossy().to_string()),
+            },
+        )
+        .unwrap();
+        let r = crate::repos::scan_project_files(&conn, &p.id).unwrap();
+        assert_eq!((r.scanned, r.imported, r.skipped), (3, 3, 0));
+        let again = crate::repos::scan_project_files(&conn, &p.id).unwrap();
+        assert_eq!((again.imported, again.skipped), (0, 3));
+    }
+
+    #[test]
     fn project_path_roundtrip() {
         let conn = test_db();
         let p = crate::repos::create_project(&conn, crate::models::NewProject {

@@ -206,6 +206,7 @@ Write tools (AI can store and curate memory, same validation as the UI):
 - `simplememory_add_project` / `_update_project` / `_delete_project`
 - `simplememory_add_personal` / `_update_personal` / `_delete_personal`
 - `simplememory_link` / `simplememory_unlink`
+- `simplememory_scan_project` (imports AGENTS.md, CLAUDE.md, Cursor rules… from the project folder)
 
 The full tool spec (names, JSON schemas, example I/O) is copyable from
 Settings → MCP, alongside a client config snippet.

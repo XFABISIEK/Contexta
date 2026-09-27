@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Search, Folder, Brain, ScrollText, Wrench, User } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
-import { debounce } from "../lib/utils";
+import { cx, debounce } from "../lib/utils";
 import type { SearchResult } from "../types";
 
 const GROUP_ORDER = ["project", "memory", "rule", "skill", "personal"] as const;
@@ -30,7 +30,9 @@ export function GlobalSearch() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const itemRefs = useRef(new Map<string, HTMLButtonElement>());
 
   const run = useMemo(
     () =>
@@ -56,9 +58,17 @@ export function GlobalSearch() {
     if (open) {
       setQuery("");
       setResults([]);
+      setIndex(0);
       setTimeout(() => inputRef.current?.focus(), 30);
     }
   }, [open ]);
+
+  useEffect(() => setIndex(0), [query]);
+
+  useEffect(() => {
+    const key = results[index] ? `${results[index].entity_type}:${results[index].entity_id}` : "";
+    itemRefs.current.get(key)?.scrollIntoView({ block: "nearest" });
+  }, [index, results]);
 
   const close = () => setSearch(false);
 
@@ -105,7 +115,15 @@ export function GlobalSearch() {
                   run(e.target.value);
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && results[0]) openResult(results[0]);
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setIndex((i) => Math.min(i + 1, results.length - 1));
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setIndex((i) => Math.max(i - 1, 0));
+                  } else if (e.key === "Enter" && results[index]) {
+                    openResult(results[index]);
+                  }
                 }}
                 placeholder="Search memories, projects, rules and skills..."
                 aria-label="Global search"
@@ -123,13 +141,26 @@ export function GlobalSearch() {
                 return (
                   <div key={g}>
                     <div className="palette-group">{GROUP_LABEL[g]}</div>
-                    {items.map((r) => (
-                      <button key={`${r.entity_type}:${r.entity_id}`} className="palette-item" onClick={() => openResult(r)}>
-                        <Icon />
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</span>
-                        <span className="sub" dangerouslySetInnerHTML={{ __html: r.snippet }} />
-                      </button>
-                    ))}
+                    {items.map((r) => {
+                      const key = `${r.entity_type}:${r.entity_id}`;
+                      const active = results[index] && `${results[index].entity_type}:${results[index].entity_id}` === key;
+                      return (
+                        <button
+                          key={key}
+                          ref={(el) => {
+                            if (el) itemRefs.current.set(key, el);
+                            else itemRefs.current.delete(key);
+                          }}
+                          className={cx("palette-item", active && "active")}
+                          onMouseEnter={() => setIndex(results.findIndex((x) => `${x.entity_type}:${x.entity_id}` === key))}
+                          onClick={() => openResult(r)}
+                        >
+                          <Icon />
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</span>
+                          <span className="sub" dangerouslySetInnerHTML={{ __html: r.snippet }} />
+                        </button>
+                      );
+                    })}
                   </div>
                 );
               })}

@@ -139,6 +139,8 @@ fn tools_list() -> Value {
                 &["source_id", "source_type", "target_id", "target_type"])),
         t("simplememory_unlink", "Delete a relation by id.",
             schema(json!({"id": {"type": "string"}}), &["id"])),
+        t("simplememory_scan_project", "Read agent instruction files (AGENTS.md, CLAUDE.md, Cursor rules…) from the project's local folder into memories.",
+            schema(json!({"project": project_prop}), &["project"])),
     ])
 }
 
@@ -387,6 +389,21 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
         "simplememory_unlink" => {
             repos::delete_connection(conn, &req(args, "id")?)?;
             Ok(text_result(json!({"deleted": true})))
+        }
+        "simplememory_scan_project" => {
+            let q = req(args, "project")?;
+            let id = match repos::get_project(conn, &q).map_err(|e| e.to_string())? {
+                Some(p) => p.id,
+                None => {
+                    let mut stmt = conn
+                        .prepare("SELECT id FROM projects WHERE name = ?1")
+                        .map_err(|e| e.to_string())?;
+                    stmt.query_row([&q], |r| r.get::<_, String>(0))
+                        .map_err(|_| format!("project '{}' not found", q))?
+                }
+            };
+            let r = repos::scan_project_files(conn, &id)?;
+            Ok(text_result(json!(r)))
         }
         other => Err(format!("unknown tool: {}", other)),
     }

@@ -11,6 +11,7 @@ import {
   Info,
   Settings,
   ChevronDown,
+  CircleUserRound,
 } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { cx } from "../lib/utils";
@@ -97,6 +98,14 @@ export function Sidebar() {
       >
         <Network />
         <span className="side-text">Graph</span>
+      </button>
+      <button
+        className={cx("side-item", view === "profile" && "active")}
+        onClick={() => go("profile")}
+        title="Profile"
+      >
+        <CircleUserRound />
+        <span className="side-text">Profile</span>
       </button>
 
       <div className="side-spacer" />

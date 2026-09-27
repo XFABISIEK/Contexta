@@ -168,6 +168,12 @@ pub struct DashboardStats {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityDay {
+    pub date: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
     pub entity_type: String,
     pub entity_id: String,
@@ -230,6 +236,14 @@ pub struct ImportResult {
     pub project: String,
     pub memories: i64,
     pub rules: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanResult {
+    pub scanned: i64,
+    pub imported: i64,
+    pub skipped: i64,
+    pub files: Vec<String>,
 }
 
 pub fn now_ts() -> String {

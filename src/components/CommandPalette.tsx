@@ -10,6 +10,7 @@ import {
   User,
   Settings,
   Info,
+  CircleUserRound,
   Plus,
   Search,
   ChevronRight,
@@ -34,6 +35,7 @@ export function CommandPalette() {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const itemRefs = useRef(new Map<string, HTMLButtonElement>());
 
   const commands: Cmd[] = useMemo(
     () => [
@@ -44,6 +46,7 @@ export function CommandPalette() {
       { id: "rules", label: "Open Rules", icon: ScrollText, run: () => go("rules") },
       { id: "skills", label: "Open Skills", icon: Wrench, run: () => go("skills") },
       { id: "personal", label: "Open Personal", icon: User, run: () => go("personal") },
+      { id: "profile", label: "Open Profile", icon: CircleUserRound, run: () => go("profile") },
       { id: "information", label: "Open Information", icon: Info, run: () => go("information") },
       { id: "settings", label: "Open Settings", icon: Settings, run: () => go("settings") },
       { id: "new-project", label: "New Project", icon: Plus, run: () => setComposer({ kind: "project" }) },
@@ -70,6 +73,12 @@ export function CommandPalette() {
   }, [open ]);
 
   useEffect(() => setIndex(0), [query]);
+
+  // Keep the keyboard-selected item visible while arrowing through the list.
+  useEffect(() => {
+    const el = itemRefs.current.get(filtered[index]?.id ?? "");
+    el?.scrollIntoView({ block: "nearest" });
+  }, [index, filtered]);
 
   const close = () => setPalette(false);
 
@@ -126,6 +135,10 @@ export function CommandPalette() {
               {filtered.map((c, i) => (
                 <button
                   key={c.id}
+                  ref={(el) => {
+                    if (el) itemRefs.current.set(c.id, el);
+                    else itemRefs.current.delete(c.id);
+                  }}
                   className={cx("palette-item", i === index && "active")}
                   onMouseEnter={() => setIndex(i)}
                   onClick={() => {

@@ -36,6 +36,7 @@ const MCP_TOOLS = [
   { name: "simplememory_delete_personal", description: "AI: delete a personal entry.", mapsTo: "delete_personal" },
   { name: "simplememory_link", description: "AI: relate two entities (project uses skill…).", mapsTo: "create_connection" },
   { name: "simplememory_unlink", description: "AI: remove a relation.", mapsTo: "delete_connection" },
+  { name: "simplememory_scan_project", description: "AI: import agent instruction files from the project folder.", mapsTo: "scan_project_files" },
 ];
 
 const mcpClientConfig = (path: string) => JSON.stringify({
