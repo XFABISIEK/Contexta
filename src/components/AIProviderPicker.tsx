@@ -35,7 +35,7 @@ export function aiProfile(value: string) {
 export function AIIcon({ provider }: { provider: string }) {
   const profile = aiProfile(provider);
   return profile.icon ? (
-    <img className="ai-mark" src={profile.icon} alt="" aria-hidden="true" />
+    <img className="ai-mark" src={profile.icon} alt="" aria-hidden="true" draggable={false} />
   ) : (
     <span className="ai-monogram" aria-hidden="true">{profile.label.charAt(0).toUpperCase()}</span>
   );

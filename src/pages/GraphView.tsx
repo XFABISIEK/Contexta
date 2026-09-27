@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
+  Background,
   Handle,
   Position,
   useReactFlow,
@@ -12,7 +13,7 @@ import {
   type Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Maximize, Crosshair, Search, Pencil, ExternalLink } from "lucide-react";
+import { Maximize, Crosshair, Search, Pencil, ExternalLink, ZoomIn, ZoomOut } from "lucide-react";
 import { AIIcon, aiProfile } from "../components/AIProviderPicker";
 import { skillIconSource } from "../components/SkillIcon";
 import { AI_NODE_ID, layoutGraph } from "../lib/graph-layout";
@@ -63,9 +64,15 @@ function AINode({ data }: { data: { provider: string } }) {
 const nodeTypes = { gnode: GNode, ai: AINode };
 
 function GraphControls({ selectedId }: { selectedId: string | null }) {
-  const { fitView, setCenter, getNode } = useReactFlow();
+  const { fitView, setCenter, getNode, zoomIn, zoomOut } = useReactFlow();
   return (
     <>
+      <button className="btn sm" onClick={() => zoomIn({ duration: 200 })} title="Zoom in">
+        <ZoomIn />
+      </button>
+      <button className="btn sm" onClick={() => zoomOut({ duration: 200 })} title="Zoom out">
+        <ZoomOut />
+      </button>
       <button className="btn sm" onClick={() => fitView({ padding: 0.2, duration: 200 })}>
         <Maximize /> Fit View
       </button>
@@ -83,14 +90,16 @@ function GraphControls({ selectedId }: { selectedId: string | null }) {
   );
 }
 
-function FitGraph({ layout }: { layout: ReturnType<typeof layoutGraph> }) {
+function FitGraph({ layoutKey }: { layoutKey: string }) {
   const { fitView } = useReactFlow();
   const initialized = useNodesInitialized();
   useEffect(() => {
     if (!initialized) return;
     const frame = requestAnimationFrame(() => fitView({ padding: 0.25 }));
     return () => cancelAnimationFrame(frame);
-  }, [initialized, layout, fitView]);
+    // Refit only when the node SET changes — never on hover/selection/data refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialized, layoutKey]);
   return null;
 }
 
@@ -143,6 +152,7 @@ export function GraphView({ projectId }: { projectId?: string }) {
   }, [data, visible]);
 
   const layout = useMemo(() => layoutGraph(visible, visibleEdgePairs), [visible, visibleEdgePairs]);
+  const layoutKey = useMemo(() => visible.map((n) => n.id).join(","), [visible]);
   const focused = hovered ?? selected?.id ?? null;
   const neighbors = useMemo(() => {
     const ids = new Set<string>(focused ? [focused] : []);
@@ -281,7 +291,7 @@ export function GraphView({ projectId }: { projectId?: string }) {
       <div className="graph-body">
         <div className="graph-canvas">
           <ReactFlowProvider>
-            <FlowCanvas nodes={nodes} edges={edges} layout={layout} onNodeClick={onNodeClick} onNodeMouseEnter={(_, node) => setHovered(node.id)} onNodeMouseLeave={() => setHovered(null)} selectedId={selected?.id ?? null} />
+            <FlowCanvas nodes={nodes} edges={edges} layoutKey={layoutKey} onNodeClick={onNodeClick} onNodeMouseEnter={(_, node) => setHovered(node.id)} onNodeMouseLeave={() => setHovered(null)} selectedId={selected?.id ?? null} />
           </ReactFlowProvider>
         </div>
         {selected && (
@@ -325,7 +335,7 @@ export function GraphView({ projectId }: { projectId?: string }) {
 function FlowCanvas({
   nodes,
   edges,
-  layout,
+  layoutKey,
   onNodeClick,
   onNodeMouseEnter,
   onNodeMouseLeave,
@@ -333,7 +343,7 @@ function FlowCanvas({
 }: {
   nodes: Node[];
   edges: Edge[];
-  layout: ReturnType<typeof layoutGraph>;
+  layoutKey: string;
   onNodeClick: (e: unknown, n: Node) => void;
   onNodeMouseEnter: (e: unknown, n: Node) => void;
   onNodeMouseLeave: () => void;
@@ -356,17 +366,21 @@ function FlowCanvas({
       nodesDraggable
       onNodesChange={onNodesChange}
       panOnDrag
+      panOnScroll={false}
+      zoomOnScroll
+      zoomOnPinch
       onNodeClick={onNodeClick}
       onNodeMouseEnter={onNodeMouseEnter}
       onNodeMouseLeave={onNodeMouseLeave}
       fitView
       fitViewOptions={{ padding: 0.25 }}
-      minZoom={0.06}
+      minZoom={0.15}
       maxZoom={3}
       proOptions={{ hideAttribution: true }}
       colorMode="dark"
     >
-      <FitGraph layout={layout} />
+      <Background gap={24} size={1.5} color="#24282e" />
+      <FitGraph layoutKey={layoutKey} />
       <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 5, display: "flex", gap: 6 }}>
         <GraphControls selectedId={selectedId} />
       </div>

@@ -11,7 +11,14 @@ export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[]) {
   const hubLinks = nodes
     .filter((n) => n.node_type === "project" || !n.project_id || !ids.has(n.project_id))
     .map((n) => ({ source: AI_NODE_ID, target: n.id }));
-  const simNodes: SimNode[] = [{ id: AI_NODE_ID, fx: 0, fy: 0 }, ...nodes.map((n) => ({ id: n.id }))];
+  // Deterministic seed: same input -> same layout, no reshuffle on reload.
+  const simNodes: SimNode[] = [
+    { id: AI_NODE_ID, fx: 0, fy: 0 },
+    ...nodes.map((n, i) => {
+      const a = (i / Math.max(nodes.length, 1)) * Math.PI * 2 - Math.PI / 2;
+      return { id: n.id, x: Math.cos(a) * 220, y: Math.sin(a) * 220 };
+    }),
+  ];
   const simLinks: SimLink[] = [
     ...edges.filter((e) => ids.has(e.source) && ids.has(e.target) && e.source !== e.target).map((e) => ({ source: e.source, target: e.target })),
     ...hubLinks.map((e) => ({ ...e, hub: true })),

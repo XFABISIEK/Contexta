@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   LayoutDashboard,
   Network,
@@ -8,40 +10,95 @@ import {
   User,
   Info,
   Settings,
+  ChevronDown,
 } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { cx } from "../lib/utils";
 import type { View } from "../types";
 
-const NAV: Array<{ view: View; label: string; icon: typeof Folder }> = [
-  { view: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { view: "graph", label: "Graph", icon: Network },
-  { view: "projects", label: "Projects", icon: Folder },
+const PROJECT_VIEWS: View[] = ["projects", "memories", "rules", "personal"];
+
+const PROJECT_SUBS: Array<{ view: View; label: string; icon: typeof Folder; all?: boolean }> = [
+  { view: "projects", label: "All projects", icon: Folder, all: true },
   { view: "memories", label: "Memories", icon: Brain },
   { view: "rules", label: "Rules", icon: ScrollText },
-  { view: "skills", label: "Skills", icon: Wrench },
   { view: "personal", label: "Personal", icon: User },
 ];
 
 export function Sidebar() {
   const view = useApp((s) => s.view);
   const go = useApp((s) => s.go);
+  const inProjects = PROJECT_VIEWS.includes(view);
+  const [open, setOpen] = useState(inProjects);
+
+  useEffect(() => {
+    if (inProjects) setOpen(true);
+  }, [inProjects]);
 
   return (
     <nav className="sidebar" aria-label="Main navigation">
       <div className="side-label">Memory</div>
-      {NAV.map((item) => (
-        <button
-          key={item.view}
-          className={cx("side-item", view === item.view && "active")}
-          onClick={() => go(item.view)}
-          title={item.label}
-          aria-label={item.label}
-        >
-          <item.icon />
-          <span className="side-text">{item.label}</span>
-        </button>
-      ))}
+      <button
+        className={cx("side-item", view === "dashboard" && "active")}
+        onClick={() => go("dashboard")}
+        title="Dashboard"
+      >
+        <LayoutDashboard />
+        <span className="side-text">Dashboard</span>
+      </button>
+
+      <button
+        className={cx("side-item", inProjects && "active")}
+        onClick={() => (inProjects && open ? go("projects", null) : setOpen(!open))}
+        title="Projects"
+        aria-expanded={open}
+      >
+        <Folder />
+        <span className="side-text">Projects</span>
+        <ChevronDown size={13} className={cx("side-chevron", open && "open")} />
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            style={{ overflow: "hidden" }}
+          >
+            {PROJECT_SUBS.map((s) => (
+              <button
+                key={s.view}
+                className={cx("side-item", "side-sub", view === s.view && "active")}
+                onClick={() => go(s.view, s.all ? null : undefined)}
+                title={s.label}
+                aria-label={s.label}
+              >
+                <s.icon />
+                <span className="side-text">{s.label}</span>
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <button
+        className={cx("side-item", view === "skills" && "active")}
+        onClick={() => go("skills")}
+        title="Skills"
+      >
+        <Wrench />
+        <span className="side-text">Skills</span>
+      </button>
+      <button
+        className={cx("side-item", view === "graph" && "active")}
+        onClick={() => go("graph")}
+        title="Graph"
+      >
+        <Network />
+        <span className="side-text">Graph</span>
+      </button>
+
       <div className="side-spacer" />
       <div className="side-foot">
         <button

@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
-import { timeAgo, truncate } from "../lib/utils";
+import { cx, timeAgo, truncate } from "../lib/utils";
 import { EmptyState } from "../components/Modal";
 import type { Connection, Memory, Project, Rule, Skill } from "../types";
 import { SkillIcon } from "../components/SkillIcon";
@@ -86,7 +86,7 @@ export function Projects() {
       ) : (
         <div className="list">
           {projects.map((p) => (
-            <div key={p.id} className="row" onClick={() => go("projects", p.id)}>
+            <div key={p.id} className={cx("row", p.id === selectedId && "selected")} onClick={() => go("projects", p.id)}>
               <div className="row-icon"><Folder /></div>
               <div className="row-main">
                 <div className="row-title">{p.name}</div>
