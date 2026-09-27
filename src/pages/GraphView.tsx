@@ -13,7 +13,7 @@ import {
   type Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Maximize, Crosshair, Search, Pencil, ExternalLink, ZoomIn, ZoomOut } from "lucide-react";
+import { Maximize, Crosshair, Search, Pencil, ExternalLink, ZoomIn, ZoomOut, Folder, Brain, ScrollText, Wrench, User } from "lucide-react";
 import { AIIcon, aiProfile } from "../components/AIProviderPicker";
 import { skillIconSource } from "../components/SkillIcon";
 import { Select } from "../components/Select";
@@ -24,6 +24,14 @@ import { cx, truncate } from "../lib/utils";
 import type { GraphData, GraphNode, Memory, Project, Rule, Skill, PersonalInfo } from "../types";
 
 const ALL_TYPES = ["project", "memory", "rule", "skill", "personal"];
+
+const TYPE_META: Record<string, { label: string; icon: typeof Folder }> = {
+  project: { label: "Projects", icon: Folder },
+  memory: { label: "Memories", icon: Brain },
+  rule: { label: "Rules", icon: ScrollText },
+  skill: { label: "Skills", icon: Wrench },
+  personal: { label: "Personal", icon: User },
+};
 
 const anchorStyle = { top: "50%", left: "50%", width: 1, height: 1, border: 0, opacity: 0 };
 
@@ -270,12 +278,26 @@ export function GraphView({ projectId }: { projectId?: string }) {
         </div>
         {!projectId && (
           <>
-            {ALL_TYPES.map((t) => (
-              <label key={t} className="check" style={{ fontSize: 11.5 }}>
-                <input type="checkbox" checked={types.includes(t)} onChange={() => toggleType(t)} />
-                {t}
-              </label>
-            ))}
+            <div className="chip-group" role="group" aria-label="Node type filters">
+              {ALL_TYPES.map((t) => {
+                const meta = TYPE_META[t];
+                const on = types.includes(t);
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    className={cx("chip", on && "on")}
+                    aria-pressed={on}
+                    onClick={() => toggleType(t)}
+                    title={`Toggle ${meta.label.toLowerCase()}`}
+                  >
+                    <meta.icon size={12} />
+                    {meta.label}
+                    <span className="chip-n">{data?.counts[t] ?? 0}</span>
+                  </button>
+                );
+              })}
+            </div>
             <Select
               label="Node limit"
               value={String(limit)}

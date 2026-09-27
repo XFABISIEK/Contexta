@@ -37,10 +37,10 @@ export const api = {
     list: (query?: string, limit = 50, offset = 0) =>
       call<Paged<Project>>("list_projects", { query: query || null, limit, offset }),
     get: (id: string) => call<Project | null>("get_project", { id }),
-    create: (name: string, description?: string) =>
-      call<Project>("create_project", { input: { name, description: description ?? "" } }),
-    update: (id: string, name: string, description?: string) =>
-      call<Project>("update_project", { id, input: { name, description: description ?? "" } }),
+    create: (name: string, description?: string, path?: string) =>
+      call<Project>("create_project", { input: { name, description: description ?? "", path: path ?? "" } }),
+    update: (id: string, name: string, description?: string, path?: string) =>
+      call<Project>("update_project", { id, input: { name, description: description ?? "", path: path ?? "" } }),
     remove: (id: string) => call<void>("delete_project", { id }),
   },
 

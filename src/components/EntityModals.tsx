@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
+import { open } from "@tauri-apps/plugin-dialog";
+import { FolderOpen } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import { debounce, MEMORY_TYPES, PRIORITIES } from "../lib/utils";
@@ -56,6 +58,7 @@ function ProjectModal({ composer, onDone }: { composer: ComposerState; onDone: (
   const toast = useApp((s) => s.toast);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [path, setPath] = useState("");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(!!composer.editId);
 
@@ -65,9 +68,19 @@ function ProjectModal({ composer, onDone }: { composer: ComposerState; onDone: (
       if (p) {
         setName(p.name);
         setDescription(p.description);
+        setPath(p.path ?? "");
       }
     }).catch((e) => setErr(e.message)).finally(() => setLoading(false));
   }, [composer.editId]);
+
+  const browse = async () => {
+    try {
+      const dir = await open({ directory: true, multiple: false, title: "Pick project folder" });
+      if (typeof dir === "string" && dir) setPath(dir);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not open folder picker");
+    }
+  };
 
   const save = async () => {
     const parsed = projectSchema.safeParse({ name, description });
@@ -77,10 +90,10 @@ function ProjectModal({ composer, onDone }: { composer: ComposerState; onDone: (
     }
     try {
       if (composer.editId) {
-        await api.projects.update(composer.editId, parsed.data.name, parsed.data.description);
+        await api.projects.update(composer.editId, parsed.data.name, parsed.data.description, path.trim());
         toast("success", "Project updated");
       } else {
-        await api.projects.create(parsed.data.name, parsed.data.description);
+        await api.projects.create(parsed.data.name, parsed.data.description, path.trim());
         toast("success", "Project created");
       }
       onDone();
@@ -108,6 +121,15 @@ function ProjectModal({ composer, onDone }: { composer: ComposerState; onDone: (
       <div className="field">
         <label>Description</label>
         <textarea className="input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What is this project about?" />
+      </div>
+      <div className="field">
+        <label>Local folder (optional)</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input className="input" value={path} onChange={(e) => setPath(e.target.value)} placeholder="D:\Projekty\Axiom" style={{ flex: 1 }} />
+          <button type="button" className="btn sm" onClick={browse} title="Browse folders">
+            <FolderOpen size={14} /> Browse
+          </button>
+        </div>
       </div>
       <FieldError msg={err} />
     </Modal>

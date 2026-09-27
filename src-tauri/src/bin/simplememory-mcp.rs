@@ -1,4 +1,4 @@
-//! SimpleMemory MCP server (stdio).
+//! Contexa MCP server (stdio).
 //!
 //! Lets any MCP-compatible AI client read AND write the local knowledge base:
 //!
@@ -92,9 +92,9 @@ fn tools_list() -> Value {
             schema(json!({"entity_types": {"type": "array", "items": {"type": "string"}}, "project_id": {"type": "string"}, "limit": {"type": "integer"}}), &[])),
         // ---- write: projects ----
         t("simplememory_add_project", "Create a project.",
-            schema(json!({"name": {"type": "string"}, "description": {"type": "string"}}), &["name"])),
+            schema(json!({"name": {"type": "string"}, "description": {"type": "string"}, "path": {"type": "string"}}), &["name"])),
         t("simplememory_update_project", "Rename / re-describe a project (by id).",
-            schema(json!({"id": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}}), &["id", "name"])),
+            schema(json!({"id": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "path": {"type": "string"}}), &["id", "name"])),
         t("simplememory_delete_project", "Delete a project (memories detach, rules cascade).",
             schema(json!({"id": {"type": "string"}}), &["id"])),
         // ---- write: memories ----
@@ -199,12 +199,12 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
                 .map_err(|e| e.to_string())?
                 .or_else(|| {
                     let mut stmt = conn
-                        .prepare("SELECT id, name, description, created_at, updated_at FROM projects WHERE name = ?1")
+                        .prepare("SELECT id, name, description, path, created_at, updated_at FROM projects WHERE name = ?1")
                         .ok()?;
                     stmt.query_row([&q], |r| {
                         Ok(models::Project {
-                            id: r.get(0)?, name: r.get(1)?, description: r.get(2)?,
-                            created_at: r.get(3)?, updated_at: r.get(4)?,
+                            id: r.get(0)?, name: r.get(1)?, description: r.get(2)?, path: r.get(3)?,
+                            created_at: r.get(4)?, updated_at: r.get(5)?,
                         })
                     })
                     .ok()
@@ -258,13 +258,13 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
         }
         "simplememory_add_project" => {
             let p = repos::create_project(conn, models::NewProject {
-                name: req(args, "name")?, description: s(args, "description"),
+                name: req(args, "name")?, description: s(args, "description"), path: opt_str(args, "path"),
             })?;
             Ok(text_result(json!(p)))
         }
         "simplememory_update_project" => {
             let p = repos::update_project(conn, &req(args, "id")?, models::NewProject {
-                name: req(args, "name")?, description: s(args, "description"),
+                name: req(args, "name")?, description: s(args, "description"), path: opt_str(args, "path"),
             })?;
             Ok(text_result(json!(p)))
         }
@@ -426,7 +426,7 @@ fn handle_message(conn: &Connection, msg: &Value) -> Option<Value> {
 
 fn main() {
     let path = db_path();
-    let mut conn = db::open_db(&path).expect("cannot open SimpleMemory database");
+    let mut conn = db::open_db(&path).expect("cannot open Contexa database");
     db::run_migrations(&mut conn).expect("migrations failed");
 
     let stdin = std::io::stdin();

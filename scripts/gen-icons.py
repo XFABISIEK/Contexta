@@ -1,4 +1,4 @@
-"""Regenerate SimpleMemory app icons (no repo binaries needed).
+"""Regenerate Contexa app icons (no repo binaries needed).
 
 Requires: pip install pillow
 Usage:    python scripts/gen-icons.py

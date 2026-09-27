@@ -5,6 +5,9 @@ pub struct Project {
     pub id: String,
     pub name: String,
     pub description: String,
+    /// Local folder linked to the project (optional, user-picked).
+    #[serde(default)]
+    pub path: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -13,6 +16,7 @@ pub struct Project {
 pub struct NewProject {
     pub name: String,
     pub description: Option<String>,
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

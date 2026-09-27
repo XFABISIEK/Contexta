@@ -2,6 +2,8 @@ import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import {
   ArrowLeft,
   Folder,
+  FolderGit2,
+  Copy,
   Plus,
   Pencil,
   Trash2,
@@ -226,6 +228,27 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }) {
       <div className="page-head">
         <h1>{project.name}</h1>
         <div className="sub">{project.description || "No description."}</div>
+        {project.path ? (
+          <div className="sub" style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+            <FolderGit2 size={12} />
+            <span className="code">{project.path}</span>
+            <button
+              className="icon-btn"
+              title="Copy path"
+              style={{ width: 20, height: 20 }}
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(project.path);
+                  toast("success", "Path copied");
+                } catch {
+                  toast("error", "Clipboard unavailable");
+                }
+              }}
+            >
+              <Copy size={12} />
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="tabs">

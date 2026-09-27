@@ -294,15 +294,16 @@ fn build_markdown(
 pub fn build_project_context(conn: &Connection, opts: &ContextOptions) -> rusqlite::Result<ProjectContext> {
     let project: Option<Project> = {
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, created_at, updated_at FROM projects WHERE id = ?1 OR name = ?1",
+            "SELECT id, name, description, path, created_at, updated_at FROM projects WHERE id = ?1 OR name = ?1",
         )?;
         let mut rows = stmt.query_map(params![opts.project], |r| {
             Ok(Project {
                 id: r.get(0)?,
                 name: r.get(1)?,
                 description: r.get(2)?,
-                created_at: r.get(3)?,
-                updated_at: r.get(4)?,
+                path: r.get(3)?,
+                created_at: r.get(4)?,
+                updated_at: r.get(5)?,
             })
         })?;
         rows.next().transpose()?

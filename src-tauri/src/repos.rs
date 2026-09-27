@@ -53,12 +53,12 @@ pub fn list_projects(
     };
     let items: Vec<Project> = match &filter {
         None => {
-            let mut stmt = conn.prepare("SELECT id, name, description, created_at, updated_at FROM projects ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2")?;
+            let mut stmt = conn.prepare("SELECT id, name, description, path, created_at, updated_at FROM projects ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2")?;
             let rows = stmt.query_map(params![limit, offset], row_to_project)?;
             rows.collect::<rusqlite::Result<Vec<Project>>>()?
         }
         Some(f) => {
-            let mut stmt = conn.prepare("SELECT id, name, description, created_at, updated_at FROM projects WHERE name LIKE ?3 OR description LIKE ?3 ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2")?;
+            let mut stmt = conn.prepare("SELECT id, name, description, path, created_at, updated_at FROM projects WHERE name LIKE ?3 OR description LIKE ?3 ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2")?;
             let rows = stmt.query_map(params![limit, offset, f], row_to_project)?;
             rows.collect::<rusqlite::Result<Vec<Project>>>()?
         }
@@ -67,7 +67,7 @@ pub fn list_projects(
 }
 
 fn row_to_project(r: &rusqlite::Row) -> rusqlite::Result<Project> {
-    Ok(Project { id: r.get(0)?, name: r.get(1)?, description: r.get(2)?, created_at: r.get(3)?, updated_at: r.get(4)? })
+    Ok(Project { id: r.get(0)?, name: r.get(1)?, description: r.get(2)?, path: r.get(3)?, created_at: r.get(4)?, updated_at: r.get(5)? })
 }
 
 pub fn create_project(conn: &Connection, input: NewProject) -> Result<Project, String> {
@@ -86,12 +86,13 @@ pub fn create_project(conn: &Connection, input: NewProject) -> Result<Project, S
         id: new_id(),
         name,
         description: input.description.unwrap_or_default(),
+        path: input.path.unwrap_or_default(),
         created_at: ts.clone(),
         updated_at: ts,
     };
     conn.execute(
-        "INSERT INTO projects (id, name, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![p.id, p.name, p.description, p.created_at, p.updated_at],
+        "INSERT INTO projects (id, name, description, path, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![p.id, p.name, p.description, p.path, p.created_at, p.updated_at],
     )
     .map_err(|e| e.to_string())?;
     Ok(p)
@@ -111,8 +112,8 @@ pub fn update_project(conn: &Connection, id: &str, input: NewProject) -> Result<
     let ts = now_ts();
     let n = conn
         .execute(
-            "UPDATE projects SET name = ?1, description = ?2, updated_at = ?3 WHERE id = ?4",
-            params![name, input.description.unwrap_or_default(), ts, id],
+            "UPDATE projects SET name = ?1, description = ?2, path = ?3, updated_at = ?4 WHERE id = ?5",
+            params![name, input.description.unwrap_or_default(), input.path.unwrap_or_default(), ts, id],
         )
         .map_err(|e| e.to_string())?;
     if n == 0 {
@@ -131,10 +132,10 @@ pub fn delete_project(conn: &Connection, id: &str) -> Result<(), String> {
 
 pub fn get_project(conn: &Connection, id: &str) -> rusqlite::Result<Option<Project>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, description, created_at, updated_at FROM projects WHERE id = ?1",
+        "SELECT id, name, description, path, created_at, updated_at FROM projects WHERE id = ?1",
     )?;
     let mut rows = stmt.query_map(params![id], |r| {
-        Ok(Project { id: r.get(0)?, name: r.get(1)?, description: r.get(2)?, created_at: r.get(3)?, updated_at: r.get(4)? })
+        Ok(Project { id: r.get(0)?, name: r.get(1)?, description: r.get(2)?, path: r.get(3)?, created_at: r.get(4)?, updated_at: r.get(5)? })
     })?;
     match rows.next() {
         None => Ok(None),
@@ -789,7 +790,8 @@ pub fn import_project(conn: &Connection, json: &str) -> Result<ImportResult, Str
         return Err(format!("Project '{}' already exists", name));
     }
     let description = v.get("project").and_then(|p| p.get("description")).and_then(|d| d.as_str()).unwrap_or("").to_string();
-    let project = create_project(conn, NewProject { name: name.clone(), description: Some(description) })?;
+    let path = v.get("project").and_then(|p| p.get("path")).and_then(|d| d.as_str()).map(|s| s.to_string());
+    let project = create_project(conn, NewProject { name: name.clone(), description: Some(description), path })?;
     let mut mem_count = 0i64;
     if let Some(arr) = v.get("memories").and_then(|m| m.as_array()) {
         for m in arr {

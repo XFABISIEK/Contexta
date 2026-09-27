@@ -5,7 +5,23 @@
 <h1 align="center">Contexta</h1>
 
 <p align="center">
-  <strong>Central Memory Layer for AI</strong> — a fast, local, desktop knowledge base for AI agents.
+  <strong>The local memory layer for AI agents.</strong><br />
+  Projects, rules, memories and skills in one fast desktop knowledge base.
+</p>
+
+<p align="center">
+  <a href="https://github.com/XFABISIEK/Contexa/releases"><img src="https://img.shields.io/github/v/release/XFABISIEK/Contexa" alt="release" /></a>
+  <a href="https://github.com/XFABISIEK/Contexa/releases"><img src="https://img.shields.io/github/downloads/XFABISIEK/Contexa/total" alt="downloads" /></a>
+  <img src="https://img.shields.io/badge/platform-Windows-blue" alt="platform" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="license" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/XFABISIEK/Contexa/releases">Download</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#mcp-model-context-protocol">MCP</a> ·
+  <a href="#development-setup">Build from source</a> ·
+  <a href="https://github.com/XFABISIEK/Contexa/issues">Report an issue</a>
 </p>
 
 Native desktop app (Tauri 2) · React + TypeScript UI · Rust backend · SQLite + FTS5 ·
@@ -205,7 +221,7 @@ Example:
 ## Project structure
 
 ```
-SimpleMemory/
+Contexa/
   src/                    React + TypeScript frontend
     app.tsx               shell (titlebar/sidebar/statusbar + routing)
     components/           Titlebar, Sidebar, StatusBar, CommandPalette,

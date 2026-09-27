@@ -182,7 +182,9 @@ CREATE INDEX IF NOT EXISTS idx_memory_tags_tag ON memory_tags(tag_id);
 
 const MIGRATION_004: &str = "ALTER TABLE skills ADD COLUMN icon TEXT NOT NULL DEFAULT '';";
 
-const MIGRATIONS: [(i64, &str); 4] = [(1, MIGRATION_001), (2, MIGRATION_002), (3, MIGRATION_003), (4, MIGRATION_004)];
+const MIGRATION_005: &str = "ALTER TABLE projects ADD COLUMN path TEXT NOT NULL DEFAULT '';";
+
+const MIGRATIONS: [(i64, &str); 5] = [(1, MIGRATION_001), (2, MIGRATION_002), (3, MIGRATION_003), (4, MIGRATION_004), (5, MIGRATION_005)];
 
 pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
     if let Some(parent) = path.parent() {
@@ -352,7 +354,7 @@ mod tests {
         let v: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 4);
+        assert_eq!(v, 5);
     }
 
     #[test]
@@ -362,7 +364,7 @@ mod tests {
         let v: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 4);
+        assert_eq!(v, 5);
     }
 
     #[test]
@@ -392,6 +394,17 @@ mod tests {
         assert!(crate::repos::create_skill(&conn, crate::models::NewSkill {
             name: "Invalid".into(), description: None, content: None, category: None, icon: Some("javascript:alert(1)".into()),
         }).is_err());
+    }
+
+    #[test]
+    fn project_path_roundtrip() {
+        let conn = test_db();
+        let p = crate::repos::create_project(&conn, crate::models::NewProject {
+            name: "Pathed".into(), description: None, path: Some("D:/code/pathed".into()),
+        }).unwrap();
+        assert_eq!(p.path, "D:/code/pathed");
+        let fetched = crate::repos::get_project(&conn, &p.id).unwrap().unwrap();
+        assert_eq!(fetched.path, "D:/code/pathed");
     }
 
     #[test]
