@@ -24,10 +24,6 @@
   <a href="https://github.com/XFABISIEK/Contexa/issues">Report an issue</a>
 </p>
 
-<p align="center">
-  <img src=".Images/dashboard.png" alt="Contexta dashboard" width="860" />
-</p>
-
 Native desktop app (Tauri 2) · React + TypeScript UI · Rust backend · SQLite + FTS5 ·
 hybrid search (FTS today, vector-ready) · relation graph · project context builder.
 
