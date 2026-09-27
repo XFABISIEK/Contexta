@@ -440,9 +440,6 @@ select.input { width: auto; }
 .information-identity { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
 .information-identity img { width: 56px; height: 56px; object-fit: contain; }
 .information-identity h2 { margin: 0 0 4px; font-size: 20px; }
-.information-ai { margin-left: auto; display: flex; align-items: center; }
-.information-ai .ai-mark, .information-ai .ai-monogram { width: 34px; height: 34px; }
-.information-ai .ai-monogram { font-size: 18px; }
 .information-description { margin: 0 0 14px; }
 .information-url { margin-top: 12px; overflow-wrap: anywhere; }
 
@@ -514,6 +511,18 @@ select.input { width: auto; }
 .quick-btn svg { width: 15px; height: 15px; color: var(--accent); flex-shrink: 0; }
 .quick-btn:hover { background: var(--panel-hover); }
 .file-input { display: none; }
+.folder-list { display: flex; flex-direction: column; gap: 8px; }
+.folder { border: 1px solid var(--border-soft); border-radius: var(--radius); overflow: hidden; background: var(--panel); }
+.folder-head {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 9px 12px; background: transparent; border: none;
+  color: var(--text-primary); font-size: 12.5px; font-weight: 600; cursor: pointer;
+  transition: background-color 150ms ease;
+}
+.folder-head:hover { background: var(--panel-hover); }
+.folder-head svg { color: var(--text-secondary); flex-shrink: 0; }
+.folder-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-body { border: none; border-top: 1px solid var(--border-soft); border-radius: 0; }
 .update-progress { height: 6px; border-radius: 3px; background: var(--panel-active); margin-top: 12px; overflow: hidden; }
 .update-progress-bar { height: 100%; background: var(--accent); border-radius: 3px; transition: width 200ms ease; }
 

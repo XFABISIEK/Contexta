@@ -99,6 +99,7 @@ export const api = {
   skills: {
     list: (query?: string | null, category?: string | null, limit = 50, offset = 0) =>
       call<Paged<Skill>>("list_skills", { query: query ?? null, category: category ?? null, limit, offset }),
+    categories: () => call<string[]>("list_skill_categories"),
     create: (input: { name: string; description?: string; content?: string; category?: string; icon?: string }) =>
       call<Skill>("create_skill", { input }),
     update: (id: string, input: { name: string; description?: string; content?: string; category?: string; icon?: string }) =>

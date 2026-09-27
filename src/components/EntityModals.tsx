@@ -419,6 +419,11 @@ function SkillModal({ composer, onDone }: { composer: ComposerState; onDone: () 
   const [category, setCategory] = useState("general");
   const [icon, setIcon] = useState("");
   const [err, setErr] = useState("");
+  const [knownCategories, setKnownCategories] = useState<string[]>([]);
+
+  useEffect(() => {
+    api.skills.categories().then(setKnownCategories).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!composer.editId) return;
@@ -474,7 +479,18 @@ function SkillModal({ composer, onDone }: { composer: ComposerState; onDone: () 
         </div>
         <div className="field">
           <label>Category</label>
-          <input className="input" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="general" />
+          <input
+            className="input"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            placeholder="general"
+            list="skill-category-options"
+          />
+          <datalist id="skill-category-options">
+            {knownCategories.map((c) => (
+              <option key={c} value={c} />
+            ))}
+          </datalist>
         </div>
       </div>
       <div className="field">

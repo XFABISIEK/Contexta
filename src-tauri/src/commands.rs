@@ -181,6 +181,13 @@ pub fn delete_skill(state: State<'_, AppState>, id: String) -> Result<(), String
 // ---------- personal ----------
 
 #[tauri::command]
+pub fn list_skill_categories(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    crate::repos::skill_categories(&lock(&state)).map_err(|e| e.to_string())
+}
+
+// ---------- personal ----------
+
+#[tauri::command]
 pub fn list_personal(state: State<'_, AppState>) -> Result<Vec<PersonalInfo>, String> {
     crate::repos::list_personal(&lock(&state)).map_err(|e| e.to_string())
 }

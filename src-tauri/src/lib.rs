@@ -74,6 +74,7 @@ pub fn run() {
             commands::update_rule,
             commands::delete_rule,
             commands::list_skills,
+            commands::list_skill_categories,
             commands::create_skill,
             commands::update_skill,
             commands::delete_skill,

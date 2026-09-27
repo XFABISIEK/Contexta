@@ -530,6 +530,13 @@ pub fn create_skill(conn: &Connection, input: NewSkill) -> Result<Skill, String>
     get_skill(conn, &id).map_err(|e| e.to_string())?.ok_or_else(|| "Skill not found after insert".to_string())
 }
 
+pub fn skill_categories(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT DISTINCT category FROM skills ORDER BY category")?;
+    let rows = stmt.query_map([], |r| r.get(0))?;
+    let out: Vec<String> = rows.collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(out)
+}
+
 pub fn get_skill(conn: &Connection, id: &str) -> rusqlite::Result<Option<Skill>> {
     let mut stmt = conn.prepare("SELECT id, name, description, content, category, created_at, updated_at, icon FROM skills WHERE id = ?1")?;
     let mut rows = stmt.query_map(params![id], |r| {

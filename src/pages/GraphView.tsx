@@ -269,7 +269,6 @@ export function GraphView({ projectId }: { projectId?: string }) {
       {!projectId && (
         <div className="page-head" style={{ padding: "22px 26px 0" }}>
           <h1>Graph</h1>
-          <div className="sub">Relations between projects, memories, rules and skills.</div>
         </div>
       )}
       <div className="graph-toolbar">
