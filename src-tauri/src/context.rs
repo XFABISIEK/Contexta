@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection};
 
 use crate::models::{
-    priority_rank, Memory, PersonalInfo, Project, ProjectContext, Rule, Skill, Tag,
+    Memory, PersonalInfo, Project, ProjectContext, Rule, Skill, Tag,
 };
 use crate::search::{fts_memory_ids, SearchParams};
 
@@ -224,7 +224,11 @@ fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
     }
-    format!("{}...", s[..max].trim_end())
+    let mut end = max.min(s.len());
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", s[..end].trim_end())
 }
 
 fn build_markdown(
@@ -242,51 +246,72 @@ fn build_markdown(
     ));
     if let Some(p) = project {
         if !p.description.is_empty() {
-            md.push_str(&format!("## Project Information\n{}\n\n", truncate(&p.description, 1200)));
+            let head = "## Project Information\n";
+            // Whole block only: skip the description when the budget is already spent.
+            let room = budget_chars.saturating_sub(md.len() + head.len() + 2);
+            if room > 0 {
+                md.push_str(head);
+                md.push_str(&format!("{}\n\n", truncate(&p.description, room.min(1200))));
+            }
         }
     }
-    let critical: Vec<&Rule> = rules.iter().filter(|r| r.priority == "critical").collect();
-    let other: Vec<&Rule> = rules.iter().filter(|r| r.priority != "critical").collect();
-    if !critical.is_empty() {
-        md.push_str("## Critical Rules\n");
-        for r in critical {
-            md.push_str(&format!("- **{}**: {}\n", r.title, truncate(&r.content, 800)));
+    // Budget-aware sections: whole items only, never a mid-item cut.
+    // Stops adding items once the budget is reached and reports the remainder.
+    let mut omitted = 0usize;
+    let push_section = |md: &mut String, omitted: &mut usize, header: &str, items: Vec<String>| {
+        if items.is_empty() {
+            return;
         }
-        md.push('\n');
-    }
-    if !other.is_empty() {
-        md.push_str("## Rules\n");
-        for r in other {
-            md.push_str(&format!("- **[{}] {}**: {}\n", r.priority, r.title, truncate(&r.content, 800)));
+        let mut kept: Vec<&String> = Vec::with_capacity(items.len());
+        let mut kept_len = 0usize;
+        for item in &items {
+            if md.len() + header.len() + kept_len + item.len() + 1 > budget_chars {
+                *omitted += 1;
+            } else {
+                kept_len += item.len() + 1;
+                kept.push(item);
+            }
         }
-        md.push('\n');
-    }
-    if !memories.is_empty() {
-        md.push_str("## Relevant Memories\n");
-        for m in memories {
-            md.push_str(&format!("- **[{}] {}**: {}\n", m.priority, m.title, truncate(&m.content, 1000)));
+        if kept.is_empty() {
+            return;
         }
-        md.push('\n');
-    }
-    if !skills.is_empty() {
-        md.push_str("## Relevant Skills\n");
-        for s in skills {
-            md.push_str(&format!("- **{}** ({}): {}\n", s.name, s.category, truncate(&s.description, 600)));
-        }
-        md.push('\n');
-    }
-    if !personal.is_empty() {
-        md.push_str("## Personal Context\n");
-        for p in personal {
-            md.push_str(&format!("- **{}**: {}\n", p.title, truncate(&p.content, 600)));
+        md.push_str(header);
+        for item in kept {
+            md.push_str(item);
+            md.push('\n');
         }
         md.push('\n');
+    };
+    let critical: Vec<String> = rules
+        .iter()
+        .filter(|r| r.priority == "critical")
+        .map(|r| format!("- **{}**: {}", r.title, truncate(&r.content, 800)))
+        .collect();
+    let other: Vec<String> = rules
+        .iter()
+        .filter(|r| r.priority != "critical")
+        .map(|r| format!("- **[{}] {}**: {}", r.priority, r.title, truncate(&r.content, 800)))
+        .collect();
+    let mems: Vec<String> = memories
+        .iter()
+        .map(|m| format!("- **[{}] {}**: {}", m.priority, m.title, truncate(&m.content, 1000)))
+        .collect();
+    let sks: Vec<String> = skills
+        .iter()
+        .map(|s| format!("- **{}** ({}): {}", s.name, s.category, truncate(&s.description, 600)))
+        .collect();
+    let pers: Vec<String> = personal
+        .iter()
+        .map(|p| format!("- **{}**: {}", p.title, truncate(&p.content, 600)))
+        .collect();
+    push_section(&mut md, &mut omitted, "## Critical Rules\n", critical);
+    push_section(&mut md, &mut omitted, "## Rules\n", other);
+    push_section(&mut md, &mut omitted, "## Relevant Memories\n", mems);
+    push_section(&mut md, &mut omitted, "## Relevant Skills\n", sks);
+    push_section(&mut md, &mut omitted, "## Personal Context\n", pers);
+    if omitted > 0 {
+        md.push_str(&format!("\n...[{} more item(s) omitted for token budget]", omitted));
     }
-    if md.len() > budget_chars {
-        md.truncate(budget_chars);
-        md.push_str("\n\n...[truncated to token budget]");
-    }
-    let _ = priority_rank("normal");
     md
 }
 
@@ -396,5 +421,25 @@ mod tests {
         )
         .unwrap();
         assert!(ctx.markdown.len() <= 256 * 4 + 64);
+    }
+
+    #[test]
+    fn budget_keeps_whole_items_and_reports_omitted() {
+        let mem = |t: &str| Memory {
+            id: t.to_string(),
+            project_id: None,
+            title: t.to_string(),
+            content: "x".repeat(500),
+            memory_type: String::new(),
+            priority: "normal".to_string(),
+            source: String::new(),
+            tags: Vec::new(),
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let md = build_markdown(&None, &[], &[mem("a"), mem("b"), mem("c")], &[], &[], 600);
+        assert!(md.contains("- **[normal] a**"));
+        assert!(!md.contains("- **[normal] c**"));
+        assert!(md.contains("omitted for token budget"));
     }
 }

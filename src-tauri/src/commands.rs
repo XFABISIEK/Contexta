@@ -155,6 +155,11 @@ pub fn delete_rule(state: State<'_, AppState>, id: String) -> Result<(), String>
     crate::repos::delete_rule(&lock(&state), &id)
 }
 
+#[tauri::command]
+pub fn get_rule(state: State<'_, AppState>, id: String) -> Result<Option<Rule>, String> {
+    crate::repos::get_rule(&lock(&state), &id).map_err(|e| e.to_string())
+}
+
 // ---------- skills ----------
 
 #[tauri::command]
@@ -183,6 +188,11 @@ pub fn delete_skill(state: State<'_, AppState>, id: String) -> Result<(), String
     crate::repos::delete_skill(&lock(&state), &id)
 }
 
+#[tauri::command]
+pub fn get_skill(state: State<'_, AppState>, id: String) -> Result<Option<Skill>, String> {
+    crate::repos::get_skill(&lock(&state), &id).map_err(|e| e.to_string())
+}
+
 // ---------- personal ----------
 
 #[tauri::command]
@@ -195,6 +205,11 @@ pub fn list_skill_categories(state: State<'_, AppState>) -> Result<Vec<String>, 
 #[tauri::command]
 pub fn list_personal(state: State<'_, AppState>) -> Result<Vec<PersonalInfo>, String> {
     crate::repos::list_personal(&lock(&state)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_personal(state: State<'_, AppState>, id: String) -> Result<Option<PersonalInfo>, String> {
+    crate::repos::get_personal(&lock(&state), &id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -332,6 +347,8 @@ pub fn backup_database(app: tauri::AppHandle, state: State<'_, AppState>) -> Res
 
 #[tauri::command]
 pub fn seed_dev_data(state: State<'_, AppState>) -> Result<String, String> {
+    #[cfg(not(debug_assertions))]
+    return Err("Seeding is disabled in production builds".to_string());
     let mut conn = state.conn.lock().expect("database lock poisoned");
     crate::db::seed_dev_data(&mut conn).map_err(|e| e.to_string())
 }

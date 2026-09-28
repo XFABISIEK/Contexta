@@ -1,12 +1,12 @@
 import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, type SimulationLinkDatum, type SimulationNodeDatum } from "d3-force";
 import type { GraphEdge, GraphNode } from "../types/index.ts";
 
-export const AI_NODE_ID = "__simplememory_ai__";
+export const AI_NODE_ID = "__contexta_ai__";
 
 type SimNode = SimulationNodeDatum & { id: string };
 type SimLink = SimulationLinkDatum<SimNode> & { hub?: boolean };
 
-export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[]) {
+export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[], jitter = 0) {
   const ids = new Set(nodes.map((n) => n.id));
   const linked = new Set<string>();
   for (const e of edges) {
@@ -22,11 +22,15 @@ export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[]) {
     .filter((n) => n.node_type === "project" || (!n.project_id && !linked.has(n.id)))
     .map((n) => ({ source: AI_NODE_ID, target: n.id }));
   // Deterministic seed: same input -> same layout, no reshuffle on reload.
+  // Shake (jitter > 0) scatters the starting ring so the simulation
+  // settles into a fresh arrangement on demand.
   const simNodes: SimNode[] = [
     { id: AI_NODE_ID, fx: 0, fy: 0 },
     ...nodes.map((n, i) => {
       const a = (i / Math.max(nodes.length, 1)) * Math.PI * 2 - Math.PI / 2;
-      return { id: n.id, x: Math.cos(a) * 220, y: Math.sin(a) * 220 };
+      const jx = jitter ? (Math.random() - 0.5) * jitter : 0;
+      const jy = jitter ? (Math.random() - 0.5) * jitter : 0;
+      return { id: n.id, x: Math.cos(a) * 220 + jx, y: Math.sin(a) * 220 + jy };
     }),
   ];
   const simLinks: SimLink[] = [

@@ -3,7 +3,7 @@
   "productName": "Contexta",
   "mainBinaryName": "contexta",
   "version": "0.0.1",
-  "identifier": "com.simplememory.app",
+  "identifier": "com.contexta.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",

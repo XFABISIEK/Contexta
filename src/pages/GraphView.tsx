@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -14,15 +14,15 @@ import {
   type Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Maximize, Crosshair, Search, Pencil, ExternalLink, ZoomIn, ZoomOut, Folder, Brain, ScrollText, Wrench, User } from "lucide-react";
+import { Maximize, Crosshair, Search, ZoomIn, ZoomOut, Shuffle, Folder, Brain, ScrollText, Wrench, User } from "lucide-react";
 import { AIIcon, aiProfile } from "../components/AIProviderPicker";
 import { skillIconSource } from "../components/SkillIcon";
-import { Select } from "../components/Select";
+import { GraphSidePanel } from "../components/GraphSidePanel";
 import { AI_NODE_ID, layoutGraph } from "../lib/graph-layout";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
-import { cx, truncate } from "../lib/utils";
-import type { GraphData, GraphNode, Memory, Project, Rule, Skill, PersonalInfo } from "../types";
+import { cx } from "../lib/utils";
+import type { GraphData, GraphNode } from "../types";
 
 const ALL_TYPES = ["project", "memory", "rule", "skill", "personal"];
 
@@ -52,7 +52,7 @@ function GNode({ data }: { data: { node: GraphNode; selected: boolean; hovered: 
       <Anchors />
       {skillIcon && <img className="gnode-icon" src={skillIcon} alt="" aria-hidden="true" draggable={false} />}
       <NodeToolbar isVisible={data.showLabel || data.selected || data.hovered} position={Position.Bottom} offset={8}>
-        <span className="gnode-label">{data.node.label}</span>
+        <span className={cx("gnode-label", (data.selected || data.hovered) && "full")}>{data.node.label}</span>
       </NodeToolbar>
     </div>
   );
@@ -73,7 +73,7 @@ function AINode({ data }: { data: { provider: string } }) {
 
 const nodeTypes = { gnode: GNode, ai: AINode };
 
-function GraphControls({ selectedId }: { selectedId: string | null }) {
+function GraphControls({ selectedId, onFit, onShake }: { selectedId: string | null; onFit: () => void; onShake: () => void }) {
   const { fitView, setCenter, getNode, zoomIn, zoomOut } = useReactFlow();
   return (
     <>
@@ -83,8 +83,11 @@ function GraphControls({ selectedId }: { selectedId: string | null }) {
       <button className="btn sm" onClick={() => zoomOut({ duration: 200 })} title="Zoom out (-)">
         <ZoomOut />
       </button>
-      <button className="btn sm" onClick={() => fitView({ padding: 0.2, duration: 200 })}>
+      <button className="btn sm" onClick={() => { onFit(); fitView({ padding: 0.2, duration: 200 }); }}>
         <Maximize /> Fit View
+      </button>
+      <button className="btn sm" onClick={onShake} title="Scatter nodes into a fresh arrangement">
+        <Shuffle /> Shake
       </button>
       <button
         className="btn sm"
@@ -101,53 +104,73 @@ function GraphControls({ selectedId }: { selectedId: string | null }) {
 }
 
 /** Keyboard zoom from the app shell: "+" in, "-" out, "0" fit. */
-function GraphZoomKeys() {
+function GraphZoomKeys({ onFit }: { onFit: () => void }) {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   useEffect(() => {
     const onZoom = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail === "in") zoomIn({ duration: 200 });
       else if (detail === "out") zoomOut({ duration: 200 });
-      else fitView({ padding: 0.25, duration: 200 });
+      else { onFit(); fitView({ padding: 0.25, duration: 200 }); }
     };
     window.addEventListener("contexa:graph-zoom", onZoom);
     return () => window.removeEventListener("contexa:graph-zoom", onZoom);
-  }, [zoomIn, zoomOut, fitView]);
+  }, [zoomIn, zoomOut, fitView, onFit]);
   return null;
 }
 
-function FitGraph({ layoutKey }: { layoutKey: string }) {  const { fitView } = useReactFlow();
+function FitGraph({ layoutKey, autoFit, shakeKey }: { layoutKey: string; autoFit: boolean; shakeKey: number }) {
+  const { fitView } = useReactFlow();
   const initialized = useNodesInitialized();
   useEffect(() => {
-    if (!initialized) return;
+    if (!initialized || !autoFit) return;
     const frame = requestAnimationFrame(() => fitView({ padding: 0.25 }));
     return () => cancelAnimationFrame(frame);
-    // Refit only when the node SET changes — never on hover/selection/data refresh.
+    // Refit only when the node SET changes on a fresh (user-untouched) camera,
+    // or after an explicit shake.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialized, layoutKey]);
+  }, [initialized, layoutKey, autoFit, shakeKey]);
   return null;
 }
 
 export function GraphView({ projectId }: { projectId?: string }) {
-  const go = useApp((s) => s.go);
-  const setComposer = useApp((s) => s.setComposer);
   const toast = useApp((s) => s.toast);
   const aiProvider = useApp((s) => s.aiProvider) ?? "claude-code";
   const [data, setData] = useState<GraphData | null>(null);
   const [types, setTypes] = useState<string[]>(ALL_TYPES);
-  const [limit, setLimit] = useState(300);
+  const limit = 300;
   const [filter, setFilter] = useState("");
+  // Deferred so typing never blocks panning: the input stays instant while
+  // layout + refit recompute one frame behind.
+  const deferredFilter = useDeferredValue(filter);
   const [selected, setSelected] = useState<GraphNode | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
+  const [panning, setPanning] = useState(false);
+  // Shake key: bumping it re-runs the layout with a random scatter and
+  // forces nodes to adopt the new positions (see FlowCanvas resetKey).
+  const [shakeKey, setShakeKey] = useState(0);
+  const onShake = useCallback(() => {
+    setShakeKey((k) => k + 1);
+    setAutoFit(true);
+  }, []);
+  // Fresh camera auto-fits on new data; the first real user pan/zoom
+  // surrenders it so refits never yank a manually framed view.
+  const [autoFit, setAutoFit] = useState(true);
+  useEffect(() => setAutoFit(true), [projectId]);
+  const onMoveStart = useCallback((e: unknown) => {
+    setPanning(true);
+    if (e) setAutoFit(false);
+  }, []);
   const [tip, setTip] = useState<{ id: string; x: number; y: number } | null>(null);
-  const [detail, setDetail] = useState<{ title: string; body: string; project?: string | null } | null>(null);
+  const tipRaf = useRef(0);
 
   const load = useCallback(async () => {
     try {
       const g = await api.graph(projectId ? undefined : types, projectId ?? null, limit);
       setData(g);
-      setSelected(null);
-      setDetail(null);
+      // Preserve the selection across reloads (e.g. after an inline save);
+      // drop it only when the node is gone.
+      setSelected((prev) => (prev && g.nodes.some((n) => n.id === prev.id) ? prev : null));
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "Failed to load graph");
     }
@@ -163,13 +186,15 @@ export function GraphView({ projectId }: { projectId?: string }) {
     return () => window.removeEventListener("contexa:changed", onChange);
   }, [load]);
 
+  useEffect(() => () => cancelAnimationFrame(tipRaf.current), []);
+
   const visible = useMemo(() => {
     if (!data) return [];
-    const q = filter.trim().toLowerCase();
+    const q = deferredFilter.trim().toLowerCase();
     return data.nodes.filter(
       (n) => types.includes(n.node_type) && (!q || n.label.toLowerCase().includes(q)),
     );
-  }, [data, types, filter]);
+  }, [data, types, deferredFilter]);
 
   const visibleEdgePairs = useMemo(() => {
     if (!data) return [];
@@ -177,7 +202,10 @@ export function GraphView({ projectId }: { projectId?: string }) {
     return data.edges.filter((e) => ids.has(e.source) && ids.has(e.target));
   }, [data, visible]);
 
-  const layout = useMemo(() => layoutGraph(visible, visibleEdgePairs), [visible, visibleEdgePairs]);
+  const layout = useMemo(
+    () => layoutGraph(visible, visibleEdgePairs, shakeKey ? 320 : 0),
+    [visible, visibleEdgePairs, shakeKey],
+  );
   const layoutKey = useMemo(() => visible.map((n) => n.id).join(","), [visible]);
   const focused = hovered ?? selected?.id ?? null;
   const neighbors = useMemo(() => {
@@ -196,6 +224,17 @@ export function GraphView({ projectId }: { projectId?: string }) {
       id: AI_NODE_ID,
       type: "ai",
       position: { x: -42, y: -42 },
+      // Explicit dimensions: React Flow hides unmeasured nodes
+      // (visibility:hidden) and skips their edges. Our sizes are fixed,
+      // so declare them — no ResizeObserver dependency, no wipe on resync.
+      width: 84,
+      height: 84,
+      // Explicit center handles: same geometry as <Anchors/>, parsed straight
+      // into handleBounds so edges always have endpoints.
+      handles: [
+        { id: "s", type: "source" as const, position: Position.Top, x: 42, y: 42, width: 1, height: 1 },
+        { id: "t", type: "target" as const, position: Position.Top, x: 42, y: 42, width: 1, height: 1 },
+      ],
       data: { provider: aiProvider },
       draggable: false,
     },
@@ -206,6 +245,12 @@ export function GraphView({ projectId }: { projectId?: string }) {
         id: n.id,
         type: "gnode",
         position: { x: point.x - size / 2, y: point.y - size / 2 },
+        width: size,
+        height: size,
+        handles: [
+          { id: "s", type: "source" as const, position: Position.Top, x: size / 2, y: size / 2, width: 1, height: 1 },
+          { id: "t", type: "target" as const, position: Position.Top, x: size / 2, y: size / 2, width: 1, height: 1 },
+        ],
         data: {
           node: n,
           selected: selected?.id === n.id,
@@ -239,41 +284,27 @@ export function GraphView({ projectId }: { projectId?: string }) {
     })),
   ], [layout, visibleEdgePairs, focused]);
 
-  const onNodeClick = useCallback(
-    async (_: unknown, node: Node) => {
-      if (node.id === AI_NODE_ID) {
-        setSelected(null);
-        setDetail(null);
-        return;
-      }
-      const gn = (node.data as { node: GraphNode }).node;
-      setSelected(gn);
-      try {
-        if (gn.node_type === "memory") {
-          const m: Memory | null = await api.memories.get(gn.id);
-          setDetail(m ? { title: m.title, body: m.content, project: m.project_id } : null);
-        } else if (gn.node_type === "project") {
-          const p: Project | null = await api.projects.get(gn.id);
-          setDetail(p ? { title: p.name, body: p.description } : null);
-        } else if (gn.node_type === "rule") {
-          const page = await api.rules.list(null, 500, 0);
-          const r: Rule | undefined = page.items.find((x) => x.id === gn.id);
-          setDetail(r ? { title: r.title, body: r.content, project: r.project_id } : null);
-        } else if (gn.node_type === "skill") {
-          const page = await api.skills.list(null, null, 500, 0);
-          const s: Skill | undefined = page.items.find((x) => x.id === gn.id);
-          setDetail(s ? { title: s.name, body: s.description } : null);
-        } else if (gn.node_type === "personal") {
-          const items: PersonalInfo[] = await api.personal.list();
-          const p = items.find((x) => x.id === gn.id);
-          setDetail(p ? { title: p.title, body: p.content } : null);
-        }
-      } catch {
-        setDetail(null);
-      }
-    },
-    [],
-  );
+  const onNodeClick = useCallback((_: unknown, node: Node) => {
+    if (node.id === AI_NODE_ID) {
+      setSelected(null);
+      return;
+    }
+    // Details + inline editing live in the side panel now.
+    setSelected((node.data as { node: GraphNode }).node);
+  }, []);
+
+  // Hover/tooltip updates are skipped mid-pan and coalesced to one frame:
+  // otherwise every mousemove re-renders 300+ nodes and panning stutters.
+  const onNodeMouseEnter = useCallback((_: unknown, node: Node) => {
+    if (!panning) setHovered(node.id);
+  }, [panning]);
+  const onNodeMouseMove = useCallback((e: unknown, node: Node) => {
+    if (panning) return;
+    const ev = e as unknown as globalThis.MouseEvent;
+    const x = ev.clientX, y = ev.clientY, id = node.id;
+    cancelAnimationFrame(tipRaf.current);
+    tipRaf.current = requestAnimationFrame(() => setTip({ id, x, y }));
+  }, [panning]);
 
   const toggleType = (t: string) =>
     setTypes((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
@@ -323,19 +354,8 @@ export function GraphView({ projectId }: { projectId?: string }) {
                 );
               })}
             </div>
-            <Select
-              label="Node limit"
-              value={String(limit)}
-              onChange={(v) => setLimit(Number(v))}
-              options={[
-                { value: "100", label: "100 nodes" },
-                { value: "300", label: "300 nodes" },
-                { value: "600", label: "600 nodes" },
-              ]}
-            />
           </>
         )}
-        <span className="mono-dim">{visible.length} nodes · {visibleEdgePairs.length} edges</span>
         <span className="mono-dim graph-hint">Drag nodes to move them · drag the background to pan</span>
         {data?.truncated && (
           <span className="mono-dim">Showing {visible.length} of {totalCount} — refine filters.</span>
@@ -348,13 +368,16 @@ export function GraphView({ projectId }: { projectId?: string }) {
               nodes={nodes}
               edges={edges}
               layoutKey={layoutKey}
+              autoFit={autoFit}
+              resetKey={shakeKey}
               onNodeClick={onNodeClick}
-              onNodeMouseEnter={(_, node) => setHovered(node.id)}
-              onNodeMouseMove={(e, node) => {
-                const ev = e as unknown as globalThis.MouseEvent;
-                setTip({ id: node.id, x: ev.clientX, y: ev.clientY });
-              }}
+              onNodeMouseEnter={onNodeMouseEnter}
+              onNodeMouseMove={onNodeMouseMove}
               onNodeMouseLeave={() => { setHovered(null); setTip(null); }}
+              onMoveStart={onMoveStart}
+              onMoveEnd={() => setPanning(false)}
+              onFit={() => setAutoFit(true)}
+              onShake={onShake}
               selectedId={selected?.id ?? null}
             />
           </ReactFlowProvider>
@@ -372,37 +395,10 @@ export function GraphView({ projectId }: { projectId?: string }) {
           )}
         </div>
         {selected && (
-          <div className="graph-side">
-            <div className="section-title" style={{ marginBottom: 6 }}>{selected.node_type}</div>
-            <h3 style={{ margin: "0 0 8px", fontSize: 13.5 }}>{selected.label}</h3>
-            {detail ? (
-              <>
-                <p className="mono-dim" style={{ whiteSpace: "pre-wrap" }}>{truncate(detail.body || "—", 600)}</p>
-                <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
-                  {(selected.node_type === "memory" || selected.node_type === "rule" || selected.node_type === "skill" || selected.node_type === "personal") && (
-                    <button
-                      className="btn sm"
-                      onClick={() => setComposer({ kind: selected.node_type as "memory" | "rule" | "skill" | "personal", editId: selected.id })}
-                    >
-                      <Pencil size={13} /> Edit
-                    </button>
-                  )}
-                  {selected.node_type === "project" && (
-                    <button className="btn sm" onClick={() => go("projects", selected.id)}>
-                      <ExternalLink size={13} /> Open
-                    </button>
-                  )}
-                  {detail.project && (
-                    <button className="btn sm ghost" onClick={() => go("projects", detail.project!)}>
-                      <ExternalLink size={13} /> Project
-                    </button>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div className="mono-dim">Loading details…</div>
-            )}
-          </div>
+          <GraphSidePanel
+            node={selected}
+            onSaved={() => window.dispatchEvent(new CustomEvent("contexa:changed"))}
+          />
         )}
       </div>
     </div>
@@ -413,28 +409,46 @@ function FlowCanvas({
   nodes,
   edges,
   layoutKey,
+  autoFit,
+  resetKey,
   onNodeClick,
   onNodeMouseEnter,
   onNodeMouseMove,
   onNodeMouseLeave,
+  onMoveStart,
+  onMoveEnd,
+  onFit,
+  onShake,
   selectedId,
 }: {
   nodes: Node[];
   edges: Edge[];
   layoutKey: string;
+  autoFit: boolean;
+  resetKey: number;
   onNodeClick: (e: unknown, n: Node) => void;
   onNodeMouseEnter: (e: unknown, n: Node) => void;
   onNodeMouseMove: (e: unknown, n: Node) => void;
   onNodeMouseLeave: () => void;
+  onMoveStart: (e: unknown) => void;
+  onMoveEnd: () => void;
+  onFit: () => void;
+  onShake: () => void;
   selectedId: string | null;
 }) {
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(nodes);
+  const prevReset = useRef(resetKey);
   useEffect(() => {
     setFlowNodes((current) => {
+      if (prevReset.current !== resetKey) {
+        // Shake: drop dragged positions and adopt the fresh layout.
+        prevReset.current = resetKey;
+        return nodes.map((node) => ({ ...node }));
+      }
       const positions = new Map(current.map((node) => [node.id, node.position]));
       return nodes.map((node) => ({ ...node, position: positions.get(node.id) ?? node.position }));
     });
-  }, [nodes, setFlowNodes]);
+  }, [nodes, resetKey, setFlowNodes]);
 
   return (
     <ReactFlow
@@ -448,6 +462,8 @@ function FlowCanvas({
       panOnScroll={false}
       zoomOnScroll
       zoomOnPinch
+      onMoveStart={onMoveStart}
+      onMoveEnd={onMoveEnd}
       onNodeClick={onNodeClick}
       onNodeMouseEnter={onNodeMouseEnter}
       onNodeMouseMove={onNodeMouseMove}
@@ -460,10 +476,10 @@ function FlowCanvas({
       colorMode="dark"
     >
       <Background gap={24} size={1.5} color="#24282e" />
-      <FitGraph layoutKey={layoutKey} />
-      <GraphZoomKeys />
+      <FitGraph layoutKey={layoutKey} autoFit={autoFit} shakeKey={resetKey} />
+      <GraphZoomKeys onFit={onFit} />
       <Panel position="bottom-left" className="graph-panel">
-        <GraphControls selectedId={selectedId} />
+        <GraphControls selectedId={selectedId} onFit={onFit} onShake={onShake} />
       </Panel>
     </ReactFlow>
   );

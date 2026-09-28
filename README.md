@@ -46,7 +46,7 @@ React UI  →  Tauri IPC  →  Rust services  →  SQLite (WAL)
 - **AI integration** — 12 AI providers with brand icons, project context preview (JSON + Markdown), copyable MCP tool spec
 - **MCP server** — standalone `contexa-mcp` stdio binary with 26 read/write tools
 - **Local-first** — SQLite (WAL), portable storage location, `VACUUM INTO` backups, JSON export/import
-- **Auto-updates** — signed NSIS bundles checked on demand from GitHub releases
+- **Auto-updates** — signed NSIS bundles checked automatically on launch + on demand from GitHub releases
 
 ## Tech stack
 
@@ -76,7 +76,7 @@ npm run dev
 ```
 
 The app opens as a **native window**. In dev, an empty database is seeded
-automatically with demo projects (`Contexta`, `Axiom`), rules, memories and skills.
+automatically with demo projects (`Contexta`, `Axiom`), rules and memories (no demo skills).
 
 ## Commands
 
@@ -92,7 +92,7 @@ automatically with demo projects (`Contexta`, `Axiom`), rules, memories and skil
 ## Build
 
 ```powershell
-$env:TAURI_SIGNING_PRIVATE_KEY = "$env:USERPROFILE\.tauri\simplememory.key"
+$env:TAURI_SIGNING_PRIVATE_KEY = "$env:USERPROFILE\.tauri\contexta.key"
 npm run tauri -- build --bundles nsis
 ```
 
@@ -104,10 +104,11 @@ embedded assets; it does **not** depend on localhost.
 ## Updates
 
 The Windows app checks `https://github.com/XFABISIEK/Contexa/releases/latest/download/latest.json`
-only when the user clicks **Check for updates** in Settings. Tauri verifies the signed NSIS
-installer before installing it. The first published release establishes the update feed.
+automatically shortly after launch, and on demand via **Check for updates** in Settings → Advanced.
+Tauri verifies the signed NSIS installer before installing it; restart applies it.
+The first published release establishes the update feed.
 
-The private signing key is at `%USERPROFILE%\.tauri\simplememory.key` on the build machine;
+The private signing key is at `%USERPROFILE%\.tauri\contexta.key` on the build machine;
 back it up securely and never commit it. Set its **contents** as the repository secret
 `TAURI_SIGNING_PRIVATE_KEY`. The public key is already in `tauri.conf.json`. To publish,
 bump the matching versions in `package.json`, `src-tauri/Cargo.toml`, and
@@ -122,9 +123,9 @@ npm run tauri -- icon .Images/app-icon.png --output src-tauri/icons
 
 ## Database
 
-- Location: `%APPDATA%/com.simplememory.app/simplememory.db` (WAL mode)
-- On first launch, the user can choose a different folder. Contexta copies the existing SQLite database with `VACUUM INTO`, keeps the original, and stores the active path in `%APPDATA%/com.simplememory.app/storage.json`.
-- The internal app identifier and database path retain the original name so existing data remains accessible after the Contexta rename.
+- Location: `%APPDATA%/com.contexta.app/contexta.db` (WAL mode)
+- On first launch, the user can choose a different folder. If the folder already holds a `contexta.db`, Contexta adopts it; otherwise it copies the existing SQLite database with `VACUUM INTO`, keeps the original, and stores the active path in `%APPDATA%/com.contexta.app/storage.json`.
+- Rename note: the app identifier and database were `com.simplememory.app/simplememory.db` before. The first launch after the rename automatically reuses that legacy location (custom `storage.json` target or a file copy), keeping the original files in place.
 - Migrations: `src-tauri/src/db.rs` (`001` schema + indexes, `002` FTS5 index +
   sync triggers, `003` composite indexes, `004` skill icons), tracked in `_migrations`.
 - Tables: `projects`, `memories`, `rules`, `skills`, `personal_information`,
@@ -178,14 +179,14 @@ the selected storage location from `storage.json` (or uses the default path).
   "mcpServers": {
     "contexa": {
       "command": "<path-to>\\contexa-mcp.exe",
-      "env": { "CONTEXA_DB": "<appdata>\\com.simplememory.app\\simplememory.db" }
+      "env": { "CONTEXA_DB": "<appdata>\\com.contexta.app\\contexta.db" }
     }
   }
 }
 ```
 
 The bundled Ponytail skill icon is licensed under MIT; its notice is in
-`src/assets/skills/LICENSE.ponytail` and in the app's Information page.
+`src/assets/skills/LICENSE.ponytail`.
 
 Read tools (context retrieval):
 
@@ -242,9 +243,11 @@ Contexa/
 - `Ctrl+K` / `Ctrl+P` — command palette
 - `Ctrl+Shift+F` — global search (FTS5)
 - `Ctrl+N` — new memory
+- `↑` / `↓` + `Enter` — move in lists, open highlighted row
 - `Alt+1..6` — dashboard, projects, memories, rules, skills, graph
 - `+` / `-` / `0` (in graph) — zoom in, zoom out, fit view
 - `Esc` — close dialogs
+- Palette, search and new-memory bindings are rebindable in Settings → Shortcuts.
 
 ## Privacy
 

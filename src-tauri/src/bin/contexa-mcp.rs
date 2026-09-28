@@ -4,7 +4,7 @@
 //!
 //! ```bash
 //! cargo build --release --bin contexa-mcp
-//! CONTEXA_DB="%APPDATA%/com.simplememory.app/simplememory.db" contexa-mcp
+//! CONTEXA_DB="%APPDATA%/com.contexta.app/contexta.db" contexa-mcp
 //! ```
 //!
 //! Protocol: newline-delimited JSON-RPC 2.0 over stdin/stdout
@@ -14,7 +14,7 @@
 
 use rusqlite::Connection;
 use serde_json::{json, Value};
-use simplememory::{context, db, graph, models, repos, search, storage};
+use contexta::{context, db, graph, models, repos, search, storage};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
@@ -32,13 +32,32 @@ fn db_path() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-        let default = PathBuf::from(base).join("com.simplememory.app").join("simplememory.db");
+        let default = PathBuf::from(&base).join("com.contexta.app").join("contexta.db");
+        // Previous install location (simplememory → Contexta rename).
+        let legacy = PathBuf::from(&base).join("com.simplememory.app").join("simplememory.db");
+        if storage::configured_path(&default).ok().flatten().is_none() {
+            if let Ok(Some(p)) = storage::configured_path(&legacy) {
+                return p;
+            }
+            if !default.exists() && legacy.is_file() {
+                return legacy;
+            }
+        }
         return storage::db_path(&default).expect("configured Contexta database unavailable");
     }
     #[cfg(not(target_os = "windows"))]
     {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let default = PathBuf::from(home).join(".local/share/com.simplememory.app/simplememory.db");
+        let default = PathBuf::from(&home).join(".local/share/com.contexta.app/contexta.db");
+        let legacy = PathBuf::from(&home).join(".local/share/com.simplememory.app/simplememory.db");
+        if storage::configured_path(&default).ok().flatten().is_none() {
+            if let Ok(Some(p)) = storage::configured_path(&legacy) {
+                return p;
+            }
+            if !default.exists() && legacy.is_file() {
+                return legacy;
+            }
+        }
         return storage::db_path(&default).expect("configured Contexta database unavailable");
     }
 }
@@ -80,8 +99,9 @@ fn tools_list() -> Value {
                 "project_id": {"type": "string"}, "limit": {"type": "integer"}, "offset": {"type": "integer"}}), &["query"])),
         t("contexa_get_project", "Fetch one project by id or name.",
             schema(json!({"project": {"type": "string"}}), &["project"])),
-        t("contexa_get_project_context", "Assemble optimized AI context: critical rules first, ranked memories, skills, conditional personal info, token-budgeted markdown.",
-            schema(json!({"project": project_prop, "query": {"type": "string"}, "max_results": {"type": "integer"}, "max_tokens": {"type": "integer"}}), &["project"])),
+        t("contexa_get_project_context", "Assemble optimized AI context: critical rules first, ranked memories, skills, conditional personal info, token-budgeted markdown. details=brief returns markdown + counts only (no duplicated arrays, ~half the tokens).",
+            schema(json!({"project": project_prop, "query": {"type": "string"}, "max_results": {"type": "integer"}, "max_tokens": {"type": "integer"},
+                "details": {"type": "string", "enum": ["full", "brief"]}}), &["project"])),
         t("contexa_get_rules", "List rules (critical first). Filter by project.",
             schema(json!({"project_id": {"type": "string"}, "limit": {"type": "integer"}}), &[])),
         t("contexa_get_memories", "Ranked memory retrieval with project/type/priority/query filters.",
@@ -224,6 +244,20 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
                 max_tokens: opt_int(args, "max_tokens").unwrap_or(4000),
             };
             let ctx = context::build_project_context(conn, &opts).map_err(|e| e.to_string())?;
+            // Brief mode drops the structured arrays (already summarized in
+            // markdown) — roughly halves response tokens. Default stays full.
+            if args.get("details").and_then(|v| v.as_str()) == Some("brief") {
+                return Ok(text_result(json!({
+                    "project": ctx.project,
+                    "counts": {
+                        "rules": ctx.rules.len(),
+                        "memories": ctx.memories.len(),
+                        "skills": ctx.skills.len(),
+                        "personal": ctx.personal.len(),
+                    },
+                    "markdown": ctx.markdown,
+                })));
+            }
             Ok(text_result(json!(ctx)))
         }
         "contexa_get_rules" => {
@@ -553,7 +587,6 @@ mod tests {
         // Notifications get no response.
         assert!(handle_message(&conn, &json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).is_none());
     }
-
     #[test]
     fn mcp_context_tool_returns_markdown() {
         let conn = test_conn();
@@ -564,5 +597,30 @@ mod tests {
         .unwrap();
         let text = out["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("Critical Rules"));
+    }
+
+    #[test]
+    fn mcp_context_brief_mode_drops_duplicated_arrays() {
+        let conn = test_conn();
+        let full = handle_call(
+            &conn, "contexa_get_project_context",
+            &json!({"project": "Axiom", "query": "auth", "max_results": 5}),
+        )
+        .unwrap();
+        let brief = handle_call(
+            &conn, "contexa_get_project_context",
+            &json!({"project": "Axiom", "query": "auth", "max_results": 5, "details": "brief"}),
+        )
+        .unwrap();
+        let full_text = full["content"][0]["text"].as_str().unwrap();
+        let brief_text = brief["content"][0]["text"].as_str().unwrap();
+        let full_json: Value = serde_json::from_str(full_text).unwrap();
+        let brief_json: Value = serde_json::from_str(brief_text).unwrap();
+        assert!(brief_json.get("memories").is_none());
+        assert!(brief_json.get("rules").is_none());
+        assert!(brief_json.get("markdown").is_some());
+        assert_eq!(brief_json["counts"]["rules"], full_json["rules"].as_array().unwrap().len());
+        assert_eq!(brief_json["counts"]["memories"], full_json["memories"].as_array().unwrap().len());
+        assert!(brief_text.len() < full_text.len());
     }
 }

@@ -234,8 +234,9 @@ pub fn is_empty(conn: &Connection) -> rusqlite::Result<bool> {
     Ok(n == 0)
 }
 
-/// Development seed: two demo projects with rules, memories, skills and links.
+/// Development seed: two demo projects with rules and memories.
 /// Only inserts when the database has no projects yet. Returns rows note.
+/// Ships zero skills: every skill in the app is user-created.
 pub fn seed_dev_data(conn: &mut Connection) -> rusqlite::Result<String> {
     if !is_empty(conn)? {
         return Ok("database already contains data, seed skipped".to_string());
@@ -296,21 +297,7 @@ pub fn seed_dev_data(conn: &mut Connection) -> rusqlite::Result<String> {
         }
     }
 
-    let skills: Vec<(&str, &str, &str, &str)> = vec![
-        ("tauri-ipc", "Tauri 2 IPC patterns", "Use invoke() from @tauri-apps/api/core with #[tauri::command] handlers. Keep commands thin, logic in services.", "tauri"),
-        ("sqlite-fts", "SQLite FTS5 search", "External-content FTS5 table with triggers. Sanitize MATCH queries, use bm25() for ranking.", "database"),
-        ("react-patterns", "React + Zustand patterns", "Co-locate feature state in zustand stores. Debounce search inputs, paginate every list.", "frontend"),
-    ];
-    let mut skill_ids: Vec<String> = Vec::new();
-    for (name, desc, content, cat) in skills {
-        let id = new_id();
-        tx.execute(
-            "INSERT INTO skills (id, name, description, content, category, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![id, name, desc, content, cat, ts, ts],
-        )?;
-        skill_ids.push(id);
-    }
-
+    // Relate two memories.
     tx.execute(
         "INSERT INTO personal_information (id, key, title, content, created_at, updated_at) VALUES (?1, 'timezone', 'Timezone', 'Europe/Warsaw (CET/CEST).', ?2, ?3)",
         params![new_id(), ts, ts],
@@ -319,14 +306,6 @@ pub fn seed_dev_data(conn: &mut Connection) -> rusqlite::Result<String> {
         "INSERT INTO personal_information (id, key, title, content, created_at, updated_at) VALUES (?1, 'editor', 'Preferred editor', 'VS Code with JetBrains Mono, dark theme.', ?2, ?3)",
         params![new_id(), ts, ts],
     )?;
-
-    // Link skills to projects + relate two memories.
-    for sid in &skill_ids {
-        tx.execute(
-            "INSERT INTO connections (id, source_id, source_type, target_id, target_type, relationship, weight, created_at) VALUES (?1, ?2, 'project', ?3, 'skill', 'uses', 1.0, ?4)",
-            params![new_id(), sm_id, sid, ts],
-        )?;
-    }
     if memory_ids.len() >= 2 {
         tx.execute(
             "INSERT INTO connections (id, source_id, source_type, target_id, target_type, relationship, weight, created_at) VALUES (?1, ?2, 'memory', ?3, 'memory', 'related', 0.8, ?4)",
@@ -403,8 +382,8 @@ mod tests {
         let days = crate::repos::activity(&conn, 365).unwrap();
         assert!(!days.is_empty());
         let total: i64 = days.iter().map(|d| d.count).sum();
-        // 2 projects + 5 memories + 4 rules + 3 skills + 2 personal + 4 connections
-        assert!(total >= 19, "unexpected activity total {}", total);
+        // 2 projects + 5 memories + 4 rules + 0 skills + 2 personal + 1 connection
+        assert!(total >= 14, "unexpected activity total {}", total);
     }
 
     #[test]
@@ -428,6 +407,31 @@ mod tests {
         assert_eq!((r.scanned, r.imported, r.skipped), (3, 3, 0));
         let again = crate::repos::scan_project_files(&conn, &p.id).unwrap();
         assert_eq!((again.imported, again.skipped), (0, 3));
+    }
+
+    #[test]
+    fn scan_project_files_handles_nested_skill_dirs_and_junk() {
+        let mut conn = test_db();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("skills/react")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agents/skills/deep/nested")).unwrap();
+        std::fs::write(dir.path().join("skills/react/SKILL.md"), "# react skill").unwrap();
+        std::fs::write(dir.path().join("skills/react/extra.md"), "examples").unwrap();
+        std::fs::write(dir.path().join(".agents/skills/deep/nested/deep.md"), "deep skill").unwrap();
+        std::fs::write(dir.path().join("skills/notes.md"), "binary\0junk").unwrap();
+        std::fs::write(dir.path().join("skills/big.md"), "x".repeat(300_000)).unwrap();
+        let p = crate::repos::create_project(
+            &conn,
+            crate::models::NewProject {
+                name: "Big".into(),
+                description: None,
+                path: Some(dir.path().to_string_lossy().to_string()),
+            },
+        )
+        .unwrap();
+        let r = crate::repos::scan_project_files(&conn, &p.id).unwrap();
+        // 3 skill docs imported; binary-with-.md-extension + oversized file skipped.
+        assert_eq!((r.scanned, r.imported, r.skipped), (5, 3, 2));
     }
 
     #[test]

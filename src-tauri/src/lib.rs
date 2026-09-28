@@ -20,7 +20,51 @@ pub fn default_db_path(app: &tauri::AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
         .expect("app data dir unavailable")
+        .join("contexta.db")
+}
+
+fn legacy_default_db_path(app: &tauri::AppHandle) -> PathBuf {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .expect("app data dir unavailable");
+    // App-data dir is derived from the bundle identifier, so the previous
+    // install (com.simplememory.app) lives next to the current one.
+    dir.parent()
+        .expect("app data dir has no parent")
+        .join("com.simplememory.app")
         .join("simplememory.db")
+}
+
+/// First launch after the simplememory → Contexta rename: reuse the previous
+/// install's database location instead of starting empty. Original files stay
+/// in place; only the new location gains a copy/pointer.
+fn migrate_legacy_storage(app: &tauri::AppHandle) -> Result<(), String> {
+    let new_default = default_db_path(app);
+    if new_default.with_file_name("storage.json").exists() {
+        return Ok(());
+    }
+    let legacy_default = legacy_default_db_path(app);
+    let legacy_config = legacy_default.with_file_name("storage.json");
+    if legacy_config.exists() {
+        let bytes = std::fs::read(&legacy_config).map_err(|e| e.to_string())?;
+        let _: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|e| format!("Invalid legacy storage config: {e}"))?;
+        if let Some(parent) = new_default.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(new_default.with_file_name("storage.json"), bytes)
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    if !new_default.exists() && legacy_default.is_file() {
+        if let Some(parent) = new_default.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::copy(&legacy_default, &new_default)
+            .map_err(|e| format!("Could not migrate legacy database: {e}"))?;
+    }
+    Ok(())
 }
 
 pub fn db_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -48,7 +92,10 @@ pub fn run() {
             app.get_webview_window("main")
                 .expect("main window unavailable")
                 .set_icon(tauri::include_image!("./icons/128x128.png"))?;
-            let path = db_path(app.handle()).map_err(io_err)?;
+            let path = {
+                migrate_legacy_storage(app.handle()).map_err(io_err)?;
+                db_path(app.handle()).map_err(io_err)?
+            };
             let mut conn = db::open_db(&path).map_err(|e| io_err(e.to_string()))?;
             db::run_migrations(&mut conn).map_err(|e| io_err(e.to_string()))?;
             app.manage(AppState { conn: Mutex::new(conn) });
@@ -71,15 +118,18 @@ pub fn run() {
             commands::update_memory,
             commands::delete_memory,
             commands::list_rules,
+            commands::get_rule,
             commands::create_rule,
             commands::update_rule,
             commands::delete_rule,
             commands::list_skills,
             commands::list_skill_categories,
+            commands::get_skill,
             commands::create_skill,
             commands::update_skill,
             commands::delete_skill,
             commands::list_personal,
+            commands::get_personal,
             commands::create_personal,
             commands::update_personal,
             commands::delete_personal,

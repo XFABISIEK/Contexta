@@ -1,10 +1,10 @@
 [package]
-name = "simplememory"
+name = "contexta"
 version = "0.0.1"
 description = "Contexta - local memory layer for AI"
 edition = "2021"
 rust-version = "1.77.2"
-default-run = "simplememory"
+default-run = "contexta"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

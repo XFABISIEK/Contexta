@@ -2,6 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { Database, Copy, Download, Upload, Cpu, Plug } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
+import {
+  SHORTCUT_ACTIONS,
+  FIXED_SHORTCUTS,
+  formatBinding,
+  bindingFromEvent,
+  loadBindings,
+  saveBinding,
+  defaultBindings,
+  type ShortcutAction,
+  type ShortcutBinding,
+} from "../lib/shortcuts";
 import { Select } from "../components/Select";
 import { downloadText, readFileText } from "../lib/utils";
 import type { DbInfo, Project } from "../types";
@@ -35,7 +46,7 @@ const MCP_TOOLS = [
   { name: "contexa_scan_project", description: "AI: import agent instruction files from the project folder.", mapsTo: "scan_project_files" },
 ];
 
-const mcpClientConfig = (path: string) => JSON.stringify({
+export const mcpClientConfig = (path: string) => JSON.stringify({
   mcpServers: {
     contexa: {
       command: "<path-to>\\contexa-mcp.exe",
@@ -47,7 +58,6 @@ const mcpClientConfig = (path: string) => JSON.stringify({
 export function Settings() {
   const toast = useApp((s) => s.toast);
   const refreshStats = useApp((s) => s.refreshStats);
-  const stats = useApp((s) => s.stats);
   const [dbInfo, setDbInfo] = useState<DbInfo | null>(null);
   const clientConfig = mcpClientConfig(dbInfo?.path ?? "<database path>");
   const [density, setDensity] = useState("comfortable");
@@ -56,10 +66,14 @@ export function Settings() {
   const [ctxQuery, setCtxQuery] = useState("");
   const [ctxOut, setCtxOut] = useState<string | null>(null);
   const [ctxLoading, setCtxLoading] = useState(false);
+  const [bindings, setBindings] = useState<Record<ShortcutAction["id"], ShortcutBinding>>(defaultBindings());
+  const [capturing, setCapturing] = useState<ShortcutAction["id"] | null>(null);
+  const [tab, setTab] = useState<"ui" | "keybinds" | "advanced">("ui");
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api.dbInfo().then(setDbInfo).catch(() => {});
+    loadBindings().then(setBindings).catch(() => {});
     api.projects.list(undefined, 200, 0).then((p) => {
       setProjects(p.items);
       if (p.items[0]) setCtxProject((cur) => cur || p.items[0].name);
@@ -72,6 +86,46 @@ export function Settings() {
     }).catch(() => {});
   }, []);
 
+  // Shortcut capture: runs in the capture phase so the shell handler
+  // never sees the pressed keys. Esc cancels.
+  useEffect(() => {
+    if (!capturing) return;
+    const onCap = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") {
+        setCapturing(null);
+        return;
+      }
+      const b = bindingFromEvent(e);
+      if (!b) return;
+      if (!b.ctrl && !b.alt) {
+        toast("error", "Use at least Ctrl or Alt so typing still works");
+        return;
+      }
+      saveBinding(capturing, b).then(() => {
+        setBindings((prev) => ({ ...prev, [capturing]: b }));
+        setCapturing(null);
+        window.dispatchEvent(new CustomEvent("contexa:shortcuts"));
+        toast("success", "Shortcut updated");
+      }).catch(() => toast("error", "Could not save shortcut"));
+    };
+    window.addEventListener("keydown", onCap, true);
+    return () => window.removeEventListener("keydown", onCap, true);
+  }, [capturing, toast]);
+
+  const resetShortcuts = async () => {
+    const d = defaultBindings();
+    try {
+      await Promise.all(SHORTCUT_ACTIONS.map((a) => saveBinding(a.id, d[a.id])));
+      setBindings(d);
+      setCapturing(null);
+      window.dispatchEvent(new CustomEvent("contexa:shortcuts"));
+      toast("success", "Shortcuts reset");
+    } catch {
+      toast("error", "Could not reset shortcuts");
+    }
+  };
   const setDensityPref = async (v: string) => {
     setDensity(v);
     document.documentElement.dataset.density = v;
@@ -110,16 +164,6 @@ export function Settings() {
       refreshStats();
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "Import failed");
-    }
-  };
-
-  const doSeed = async () => {
-    try {
-      const msg = await api.seed();
-      toast("info", msg);
-      refreshStats();
-    } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Seed failed");
     }
   };
 
@@ -165,6 +209,21 @@ export function Settings() {
         <div className="sub">Adjust the interface and manage local data.</div>
       </div>
 
+      <div className="tabs" role="tablist" aria-label="Settings sections" style={{ marginBottom: 18 }}>
+        {(["ui", "keybinds", "advanced"] as const).map((t) => (
+          <button
+            key={t}
+            role="tab"
+            aria-selected={tab === t}
+            className={tab === t ? "tab active" : "tab"}
+            onClick={() => setTab(t)}
+          >
+            {t === "ui" ? "UI" : t === "keybinds" ? "Keybinds" : "Advanced"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "ui" && (
       <div className="section">
         <div className="section-head"><span className="section-title">Appearance</span></div>
         <div className="card">
@@ -175,21 +234,36 @@ export function Settings() {
               <button className={density === "comfortable" ? "active" : ""} onClick={() => setDensityPref("comfortable")}>Comfortable</button>
             </span>
           </div>
-          <div className="kv"><span className="k">Theme</span><span className="mono-dim">Dark</span></div>
         </div>
       </div>
+      )}
 
+      {tab === "advanced" && (
+      <div className="section">
+        <div className="section-head"><span className="section-title">Updates</span></div>
+        <div className="card">
+          <p className="mono-dim" style={{ marginTop: 0 }}>
+            Contexta checks GitHub releases automatically on launch. You can also check now.
+          </p>
+          <div className="settings-actions" style={{ borderTop: "none", paddingTop: 0, marginTop: 0 }}>
+            <button className="btn sm" onClick={() => window.dispatchEvent(new CustomEvent("contexa:check-updates"))}>
+              <Download size={14} /> Check for updates
+            </button>
+          </div>
+        </div>
+      </div>
+      )}
+
+      {tab === "advanced" && (
       <div className="section">
         <div className="section-head"><span className="section-title">Database</span></div>
         <div className="card">
           <div className="kv"><span className="k">Location</span><span className="mono-dim settings-path">{dbInfo?.path ?? "…"}</span></div>
           <div className="kv"><span className="k">Size</span><span>{dbInfo ? `${(dbInfo.size_bytes / 1024).toFixed(1)} KB` : "…"}</span></div>
-          <div className="kv"><span className="k">Totals</span><span>{stats ? `${stats.projects} projects · ${stats.memories} memories · ${stats.rules} rules · ${stats.skills} skills` : "…"}</span></div>
           <div className="settings-actions">
             <button className="btn sm" onClick={doBackup}><Database size={14} /> Backup now</button>
             <button className="btn sm" onClick={doExport}><Download size={14} /> Export database (JSON)</button>
             <button className="btn sm" onClick={() => fileRef.current?.click()}><Upload size={14} /> Import project (JSON)</button>
-            <button className="btn sm ghost" onClick={doSeed}>Seed demo data</button>
             <input
               ref={fileRef}
               type="file"
@@ -204,9 +278,34 @@ export function Settings() {
           </div>
         </div>
       </div>
+      )}
 
-      <details className="settings-advanced">
-        <summary>Developer tools</summary>
+      {tab === "keybinds" && (
+      <div className="section">
+        <div className="section-head"><span className="section-title">Shortcuts</span></div>
+        <div className="card">
+          {SHORTCUT_ACTIONS.map((a) => (
+            <div className="kv" key={a.id}>
+              <span className="k">{a.label}<br /><span className="mono-dim">{a.hint}</span></span>
+              <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span className="kbd">{capturing === a.id ? "press keys…" : formatBinding(bindings[a.id])}</span>
+                <button
+                  className="btn sm"
+                  onClick={() => setCapturing(capturing === a.id ? null : a.id)}
+                >
+                  {capturing === a.id ? "Cancel" : "Change"}
+                </button>
+              </span>
+            </div>
+          ))}
+          <div className="kv"><span className="k">Defaults</span><span><button className="btn sm ghost" onClick={resetShortcuts}>Reset all</button></span></div>
+          <div className="kv"><span className="k">Fixed</span><span className="mono-dim">{FIXED_SHORTCUTS.map((f) => `${f.keys} — ${f.label}`).join(" · ")}</span></div>
+        </div>
+      </div>
+      )}
+
+      {tab === "advanced" && (
+      <>
       <div className="section">
         <div className="section-head"><span className="section-title">AI Integration — context preview</span></div>
         <div className="card">
@@ -267,7 +366,8 @@ export function Settings() {
           </div>
         </div>
       </div>
-      </details>
+      </>
+      )}
     </div>
   );
 }

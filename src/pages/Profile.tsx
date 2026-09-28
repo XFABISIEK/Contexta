@@ -53,12 +53,20 @@ function ActivityHeatmap({ days }: { days: ActivityDay[] }) {
     }
     const months: Array<string | null> = [];
     let prev = -1;
-    for (const col of weeks) {
+    let lastLabeled = -99;
+    weeks.forEach((col, i) => {
       const first = col.find((c) => c !== null);
       const m = first ? Number(first.date.slice(5, 7)) - 1 : -1;
-      months.push(m !== prev && m >= 0 ? MONTHS[m] : null);
+      // Label a month only with breathing room — adjacent "Sep Oct" labels
+      // overlap on narrow columns, so require a 3-column gap.
+      if (m !== prev && m >= 0 && i - lastLabeled >= 3) {
+        months.push(MONTHS[m]);
+        lastLabeled = i;
+      } else {
+        months.push(null);
+      }
       if (m >= 0) prev = m;
-    }
+    });
     return { weeks, months, total };
   }, [days]);
 
@@ -89,7 +97,6 @@ function ActivityHeatmap({ days }: { days: ActivityDay[] }) {
                       className="heat-cell"
                       style={{ background: level(cell.count) }}
                       onMouseEnter={(e) => setHovered({ ...cell, x: e.clientX, y: e.clientY })}
-                      onMouseMove={(e) => setHovered({ ...cell, x: e.clientX, y: e.clientY })}
                       onMouseLeave={() => setHovered(null)}
                     />
                   ) : (

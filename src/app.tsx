@@ -1,14 +1,17 @@
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useApp } from "./stores/app-store";
 import { api } from "./lib/tauri";
+import { bindingsFromSettings, defaultBindings, matchesBinding, type ShortcutAction, type ShortcutBinding } from "./lib/shortcuts";
 import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { CommandPalette } from "./components/CommandPalette";
 import { GlobalSearch } from "./components/GlobalSearch";
 import { Toasts } from "./components/Toasts";
+import { UpdatePrompt } from "./components/UpdatePrompt";
 import { AIProviderPicker } from "./components/AIProviderPicker";
+import { ConnectAI } from "./components/ConnectAI";
 import { StorageSetup } from "./components/StorageSetup";
 import { EntityModals, DeleteConfirm } from "./components/EntityModals";
 import { Dashboard } from "./pages/Dashboard";
@@ -31,10 +34,13 @@ export function App() {
   const aiProvider = useApp((s) => s.aiProvider);
   const setAiProvider = useApp((s) => s.setAiProvider);
   const [storageReady, setStorageReady] = useState<boolean | undefined>();
+  const [connectDone, setConnectDone] = useState<boolean | undefined>();
   const [defaultPath, setDefaultPath] = useState("");
   const [startupError, setStartupError] = useState("");
+  // Customizable bindings (Settings → Shortcuts); loaded with preferences.
+  const shortcutsRef = useRef<Record<ShortcutAction["id"], ShortcutBinding> | null>(null);
 
-  // Initial load: stats + dev seed when the database is empty.
+  // Initial load: stats, then preferences.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -52,21 +58,16 @@ export function App() {
       }
       await refreshStats();
       if (cancelled) return;
-      const stats = useApp.getState().stats;
-      if (stats && stats.projects === 0 && import.meta.env.DEV) {
-        try {
-          await api.seed();
-        } catch {
-          /* seed is best-effort */
-        }
-        if (!cancelled) await refreshStats();
-      }
+      // No auto-seed: a fresh database stays empty. Demo data is available
+      // on demand via the `seed_dev_data` command (tests, manual runs).
       // Restore density preference.
       try {
         const settings = await api.settings.all();
         if (cancelled) return;
         if (settings.density) document.documentElement.dataset.density = settings.density;
         setAiProvider(settings.ai_provider?.trim() || null);
+        setConnectDone(settings.connect_done === "1");
+        shortcutsRef.current = bindingsFromSettings(settings);
       } catch {
         if (!cancelled) setAiProvider(null);
       }
@@ -81,22 +82,23 @@ export function App() {
     const views = ["dashboard", "projects", "memories", "rules", "skills", "graph"] as const;
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
+      const bindings = shortcutsRef.current ?? defaultBindings();
       const typing = !!(e.target as HTMLElement | null)?.closest?.(
         "input, textarea, select, [contenteditable]",
       );
-      if (mod && e.key.toLowerCase() === "k") {
+      if (matchesBinding(e, bindings.palette)) {
         e.preventDefault();
         useApp.getState().setPalette(!useApp.getState().paletteOpen);
       } else if (mod && e.key.toLowerCase() === "p") {
         e.preventDefault();
         useApp.getState().setPalette(!useApp.getState().paletteOpen);
-      } else if (mod && e.shiftKey && e.key.toLowerCase() === "f") {
+      } else if (matchesBinding(e, bindings.search)) {
         e.preventDefault();
         useApp.getState().setSearch(!useApp.getState().searchOpen);
       } else if (e.key === "Escape") {
         useApp.getState().setPalette(false);
         useApp.getState().setSearch(false);
-      } else if (mod && e.key.toLowerCase() === "n" && !typing) {
+      } else if (matchesBinding(e, bindings.newMemory) && !typing) {
         // New memory from anywhere.
         e.preventDefault();
         useApp.getState().setComposer({ kind: "memory" });
@@ -121,11 +123,61 @@ export function App() {
     };
   }, []);
 
+  // Arrow navigation across list rows: Up/Down moves the highlight,
+  // Enter activates it. Skipped while typing, in overlays, or on the graph.
+  useEffect(() => {
+    const onArrows = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Enter") return;
+      const st = useApp.getState();
+      if (st.paletteOpen || st.searchOpen || st.composer || st.confirmDelete) return;
+      if (st.view === "graph") return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.("input, textarea, select, [contenteditable], button")) return;
+      const rows = [...document.querySelectorAll(".content .row")].filter((el) => {
+        const r = (el as HTMLElement).getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      }) as HTMLElement[];
+      if (rows.length === 0) return;
+      const box = onArrows as unknown as { last?: HTMLElement };
+      if (e.key === "Enter") {
+        const cur = box.last && rows.includes(box.last) ? box.last : null;
+        if (cur) {
+          e.preventDefault();
+          cur.click();
+        }
+        return;
+      }
+      e.preventDefault();
+      let idx = box.last ? rows.indexOf(box.last) : -1;
+      if (idx === -1) idx = e.key === "ArrowDown" ? -1 : rows.length;
+      idx = e.key === "ArrowDown" ? Math.min(rows.length - 1, idx + 1) : Math.max(0, idx - 1);
+      rows.forEach((r) => r.classList.remove("kb-focus"));
+      rows[idx].classList.add("kb-focus");
+      box.last = rows[idx];
+      rows[idx].scrollIntoView({ block: "nearest" });
+    };
+    window.addEventListener("keydown", onArrows);
+    return () => window.removeEventListener("keydown", onArrows);
+  }, []);
+
+  // Hot-reload customizable bindings after a Settings change.
+  useEffect(() => {
+    const reload = () => {
+      api.settings.all().then((s) => {
+        shortcutsRef.current = bindingsFromSettings(s);
+      }).catch(() => {});
+    };
+    window.addEventListener("contexa:shortcuts", reload);
+    return () => window.removeEventListener("contexa:shortcuts", reload);
+  }, []);
+
   if (startupError) return <div className="app"><Titlebar /><div className="ai-setup mono-dim" role="alert">{startupError}</div></div>;
   if (storageReady === undefined) return <div className="app"><Titlebar /><div className="ai-setup mono-dim">Loading storage…</div></div>;
   if (!storageReady) return <div className="app"><Titlebar /><StorageSetup defaultPath={defaultPath} onComplete={() => setStorageReady(true)} /><Toasts /></div>;
   if (aiProvider === undefined) return <div className="app"><Titlebar /><div className="ai-setup mono-dim">Loading settings…</div></div>;
-  if (aiProvider === null) return <div className="app"><Titlebar /><AIProviderPicker value={null} onSaved={setAiProvider} setup /><Toasts /></div>;
+  if (aiProvider === null) return <div className="app"><Titlebar /><AIProviderPicker value={null} onSaved={(v) => { setAiProvider(v); setConnectDone(false); }} setup /><Toasts /></div>;
+  if (connectDone === undefined) return <div className="app"><Titlebar /><div className="ai-setup mono-dim">Loading settings…</div></div>;
+  if (!connectDone) return <div className="app"><Titlebar /><ConnectAI onComplete={() => setConnectDone(true)} /><Toasts /></div>;
 
   return (
     <div className="app">
@@ -165,6 +217,7 @@ export function App() {
       <GlobalSearch />
       <EntityModals />
       <DeleteConfirm />
+      <UpdatePrompt />
       <Toasts />
     </div>
   );

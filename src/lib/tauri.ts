@@ -92,6 +92,7 @@ export const api = {
   rules: {
     list: (projectId?: string | null, limit = 50, offset = 0) =>
       call<Paged<Rule>>("list_rules", { projectId: projectId ?? null, limit, offset }),
+    get: (id: string) => call<Rule | null>("get_rule", { id }),
     create: (input: { project_id?: string | null; title: string; content: string; priority?: string; enabled?: boolean }) =>
       call<Rule>("create_rule", { input }),
     update: (id: string, input: { project_id?: string | null; title: string; content: string; priority?: string; enabled?: boolean }) =>
@@ -103,6 +104,7 @@ export const api = {
     list: (query?: string | null, category?: string | null, limit = 50, offset = 0) =>
       call<Paged<Skill>>("list_skills", { query: query ?? null, category: category ?? null, limit, offset }),
     categories: () => call<string[]>("list_skill_categories"),
+    get: (id: string) => call<Skill | null>("get_skill", { id }),
     create: (input: { name: string; description?: string; content?: string; category?: string; icon?: string }) =>
       call<Skill>("create_skill", { input }),
     update: (id: string, input: { name: string; description?: string; content?: string; category?: string; icon?: string }) =>
@@ -112,6 +114,7 @@ export const api = {
 
   personal: {
     list: () => call<PersonalInfo[]>("list_personal"),
+    get: (id: string) => call<PersonalInfo | null>("get_personal", { id }),
     create: (input: { key: string; title: string; content: string }) =>
       call<PersonalInfo>("create_personal", { input }),
     update: (id: string, input: { key: string; title: string; content: string }) =>
@@ -166,5 +169,4 @@ export const api = {
   importProject: (json: string) => call<ImportResult>("import_project", { json }),
   backup: () => call<string>("backup_database"),
   scanProject: (projectId: string) => call<ScanResult>("scan_project_files", { projectId }),
-  seed: () => call<string>("seed_dev_data"),
 };

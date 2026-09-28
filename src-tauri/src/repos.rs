@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::models::{
     new_id, normalize_priority, now_ts, Connection as ConnectionModel, DashboardStats,
@@ -500,7 +500,32 @@ pub fn delete_rule(conn: &Connection, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn get_rule(conn: &Connection, id: &str) -> rusqlite::Result<Option<Rule>> {
+    let mut stmt = conn.prepare("SELECT id, project_id, title, content, priority, enabled, created_at, updated_at FROM rules WHERE id = ?1")?;
+    let mut rows = stmt.query_map(params![id], |r| {
+        Ok(Rule {
+            id: r.get(0)?, project_id: r.get(1)?, title: r.get(2)?, content: r.get(3)?,
+            priority: r.get(4)?, enabled: r.get::<_, i64>(5)? != 0, created_at: r.get(6)?, updated_at: r.get(7)?,
+        })
+    })?;
+    match rows.next() {
+        None => Ok(None),
+        Some(r) => Ok(Some(r?)),
+    }
+}
+
 // ---------- skills ----------
+
+/// Canonical category: trimmed, lowercase, never empty. Keeps the Skills
+/// page groups and the composer datalist free of "React"/"react"/"" splits.
+fn normalize_category(input: Option<String>) -> String {
+    let c = input.unwrap_or_default().trim().to_lowercase();
+    if c.is_empty() {
+        "general".to_string()
+    } else {
+        c
+    }
+}
 
 pub fn list_skills(
     conn: &Connection,
@@ -540,7 +565,7 @@ pub fn create_skill(conn: &Connection, input: NewSkill) -> Result<Skill, String>
     let id = new_id();
     conn.execute(
         "INSERT INTO skills (id, name, description, content, category, created_at, updated_at, icon) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![id, name, input.description.unwrap_or_default(), input.content.unwrap_or_default(), input.category.unwrap_or_else(|| "general".to_string()), ts, ts, input.icon.unwrap_or_default()],
+        params![id, name, input.description.unwrap_or_default(), input.content.unwrap_or_default(), normalize_category(input.category), ts, ts, input.icon.unwrap_or_default()],
     )
     .map_err(|e| {
         if e.to_string().contains("UNIQUE") {
@@ -555,7 +580,14 @@ pub fn create_skill(conn: &Connection, input: NewSkill) -> Result<Skill, String>
 pub fn skill_categories(conn: &Connection) -> rusqlite::Result<Vec<String>> {
     let mut stmt = conn.prepare("SELECT DISTINCT category FROM skills ORDER BY category")?;
     let rows = stmt.query_map([], |r| r.get(0))?;
-    let out: Vec<String> = rows.collect::<rusqlite::Result<Vec<String>>>()?;
+    let mut out: Vec<String> = rows
+        .collect::<rusqlite::Result<Vec<String>>>()?
+        .into_iter()
+        .map(|c| c.trim().to_lowercase())
+        .filter(|c| !c.is_empty())
+        .collect();
+    out.sort();
+    out.dedup();
     Ok(out)
 }
 
@@ -582,7 +614,7 @@ pub fn update_skill(conn: &Connection, id: &str, input: NewSkill) -> Result<Skil
     let n = conn
         .execute(
             "UPDATE skills SET name = ?1, description = ?2, content = ?3, category = ?4, icon = COALESCE(?5, icon), updated_at = ?6 WHERE id = ?7",
-            params![input.name, input.description.unwrap_or_default(), input.content.unwrap_or_default(), input.category.unwrap_or_else(|| "general".to_string()), input.icon, ts, id],
+            params![input.name, input.description.unwrap_or_default(), input.content.unwrap_or_default(), normalize_category(input.category), input.icon, ts, id],
         )
         .map_err(|e| e.to_string())?;
     if n == 0 {
@@ -618,6 +650,17 @@ pub fn list_personal(conn: &Connection) -> rusqlite::Result<Vec<PersonalInfo>> {
         Ok(PersonalInfo { id: r.get(0)?, key: r.get(1)?, title: r.get(2)?, content: r.get(3)?, created_at: r.get(4)?, updated_at: r.get(5)? })
     })?;
     rows.collect::<rusqlite::Result<Vec<PersonalInfo>>>()
+}
+
+pub fn get_personal(conn: &Connection, id: &str) -> rusqlite::Result<Option<PersonalInfo>> {
+    let mut stmt = conn.prepare("SELECT id, key, title, content, created_at, updated_at FROM personal_information WHERE id = ?1")?;
+    let mut rows = stmt.query_map(params![id], |r| {
+        Ok(PersonalInfo { id: r.get(0)?, key: r.get(1)?, title: r.get(2)?, content: r.get(3)?, created_at: r.get(4)?, updated_at: r.get(5)? })
+    })?;
+    match rows.next() {
+        None => Ok(None),
+        Some(r) => Ok(Some(r?)),
+    }
 }
 
 pub fn create_personal(conn: &Connection, input: NewPersonalInfo) -> Result<PersonalInfo, String> {
@@ -891,6 +934,54 @@ const AI_CONTEXT_FILES: &[&str] = &[
 /// Directories scanned one level deep for instruction files.
 const AI_CONTEXT_DIRS: &[&str] = &[".cursor/rules", ".codex", "agents"];
 
+/// Skill libraries walked recursively: each skill is a folder
+/// (SKILL.md plus examples, scripts docs, …).
+const SKILL_DIRS: &[&str] = &["skills", ".agents/skills", ".claude/skills"];
+
+const MAX_SCAN_FILES: usize = 500;
+const MAX_FILE_BYTES: usize = 250_000;
+const MAX_SCAN_DEPTH: usize = 4;
+
+fn is_text_doc(fp: &Path) -> bool {
+    let ext = fp
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    ext == "md" || ext == "mdc" || ext == "txt"
+}
+
+fn push_candidate(root: &Path, fp: &Path, rels: &mut Vec<String>) {
+    if !fp.is_file() || !is_text_doc(fp) {
+        return;
+    }
+    if let Ok(rel) = fp.strip_prefix(root) {
+        rels.push(rel.to_string_lossy().replace('\\', "/"));
+    }
+}
+
+fn walk_recursive(root: &Path, dir: &Path, depth: usize, rels: &mut Vec<String>) {
+    if depth > MAX_SCAN_DEPTH || rels.len() >= MAX_SCAN_FILES {
+        return;
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    // Stable order so rescans agree on which files win the cap.
+    let mut fps: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    fps.sort();
+    for fp in fps {
+        if rels.len() >= MAX_SCAN_FILES {
+            return;
+        }
+        if fp.is_dir() {
+            walk_recursive(root, &fp, depth + 1, rels);
+        } else {
+            push_candidate(root, &fp, rels);
+        }
+    }
+}
+
 fn ai_context_candidates(root: &Path) -> Vec<String> {
     let mut rels: Vec<String> = Vec::new();
     for f in AI_CONTEXT_FILES {
@@ -905,24 +996,15 @@ fn ai_context_candidates(root: &Path) -> Vec<String> {
             Err(_) => continue,
         };
         for entry in entries.flatten() {
-            let fp = entry.path();
-            if !fp.is_file() {
-                continue;
-            }
-            let ext = fp
-                .extension()
-                .map(|e| e.to_string_lossy().to_lowercase())
-                .unwrap_or_default();
-            if ext == "md" || ext == "mdc" || ext == "txt" {
-                if let Ok(rel) = fp.strip_prefix(root) {
-                    rels.push(rel.to_string_lossy().replace('\\', "/"));
-                }
-            }
+            push_candidate(root, &entry.path(), &mut rels);
         }
+    }
+    for d in SKILL_DIRS {
+        walk_recursive(root, &root.join(d), 1, &mut rels);
     }
     rels.sort();
     rels.dedup();
-    rels.truncate(50);
+    rels.truncate(MAX_SCAN_FILES);
     rels
 }
 
@@ -948,7 +1030,7 @@ pub fn scan_project_files(conn: &Connection, project_id: &str) -> Result<crate::
     let scanned = rels.len() as i64;
     for rel in rels {
         let bytes = match std::fs::read(root.join(&rel)) {
-            Ok(b) if b.len() <= 100_000 => b,
+            Ok(b) if b.len() <= MAX_FILE_BYTES && !b.contains(&0) => b,
             _ => {
                 skipped += 1;
                 continue;

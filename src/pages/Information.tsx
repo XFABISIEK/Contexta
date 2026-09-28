@@ -4,7 +4,6 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Github, ShieldCheck } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import appIcon from "../../src-tauri/icons/128x128.png";
-import ponytailLicense from "../assets/skills/LICENSE.ponytail?raw";
 
 const REPOSITORY = "https://github.com/XFABISIEK/Contexa";
 
@@ -58,10 +57,6 @@ export function Information() {
           <div className="kv"><span className="k">Storage</span><span className="mono-dim">Your data is stored in one local SQLite database.</span></div>
         </div>
       </div>
-      <details className="settings-advanced">
-        <summary>Third-party icon license · Ponytail</summary>
-        <div className="md-preview">{ponytailLicense}</div>
-      </details>
     </div>
   );
 }

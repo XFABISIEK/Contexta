@@ -17,7 +17,7 @@ const projectSchema = z.object({
 
 const memorySchema = z.object({
   title: z.string().trim().min(1, "Title is required").max(200),
-  content: z.string().max(100000).default(""),
+  content: z.string().max(250000).default(""),
 });
 
 const ruleSchema = z.object({
@@ -27,9 +27,9 @@ const ruleSchema = z.object({
 
 const skillSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(120),
-  description: z.string().max(4000).default(""),
-  content: z.string().max(100000).default(""),
-  category: z.string().max(80).default("general"),
+  description: z.string().max(8000).default(""),
+  content: z.string().max(500000).default(""),
+  category: z.string().trim().max(80).default("general"),
   icon: z.string().max(180000).default(""),
 });
 
@@ -56,6 +56,7 @@ function FieldError({ msg }: { msg?: string }) {
 
 function ProjectModal({ composer, onDone }: { composer: ComposerState; onDone: () => void }) {
   const toast = useApp((s) => s.toast);
+  const askDelete = useApp((s) => s.askDelete);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [path, setPath] = useState("");
@@ -102,6 +103,19 @@ function ProjectModal({ composer, onDone }: { composer: ComposerState; onDone: (
     }
   };
 
+  const remove = () => {
+    if (!composer.editId) return;
+    askDelete(`Delete project "${name.trim() || "untitled"}"?`, "Memories detach, rules are removed.", async () => {
+      try {
+        await api.projects.remove(composer.editId!);
+        toast("success", "Project deleted");
+        onDone();
+      } catch (e) {
+        toast("error", e instanceof Error ? e.message : "Delete failed");
+      }
+    });
+  };
+
   return (
     <Modal
       open
@@ -109,6 +123,7 @@ function ProjectModal({ composer, onDone }: { composer: ComposerState; onDone: (
       onClose={onDone}
       footer={
         <>
+          {composer.editId && <button className="btn danger" onClick={remove} style={{ marginRight: "auto" }}>Delete</button>}
           <button className="btn ghost" onClick={onDone}>Cancel</button>
           <button className="btn primary" onClick={save} disabled={loading}>Save</button>
         </>
@@ -142,6 +157,8 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 
 function MemoryModal({ composer, onDone }: { composer: ComposerState; onDone: () => void }) {
   const toast = useApp((s) => s.toast);
+  const refreshStats = useApp((s) => s.refreshStats);
+  const askDelete = useApp((s) => s.askDelete);
   const projects = useProjectOptions();
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -197,17 +214,20 @@ function MemoryModal({ composer, onDone }: { composer: ComposerState; onDone: ()
     if (key === snapshot.current) return;
     if (!title.trim()) return;
     snapshot.current = key;
-    persist(composer.editId, {
-      title: title.trim(),
-      content,
-      project_id: projectId === "none" ? null : projectId,
-      memory_type: memoryType,
-      priority,
-      source,
-      tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
-    });
+    persist(composer.editId, buildData());
     return () => persist.cancel();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, content, projectId, memoryType, priority, tags, source, isCreate, loaded, composer.editId, persist]);
+
+  const buildData = () => ({
+    title: title.trim(),
+    content,
+    project_id: projectId === "none" ? null : projectId,
+    memory_type: memoryType,
+    priority,
+    source,
+    tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+  });
 
   const create = async () => {
     const parsed = memorySchema.safeParse({ title, content });
@@ -232,6 +252,40 @@ function MemoryModal({ composer, onDone }: { composer: ComposerState; onDone: ()
     }
   };
 
+  const saveNow = async () => {
+    if (!composer.editId) return;
+    if (!title.trim()) {
+      setErr("Title is required.");
+      return;
+    }
+    persist.cancel();
+    setSaveState("saving");
+    try {
+      await api.memories.update(composer.editId, buildData());
+      setSaveState("saved");
+      refreshStats();
+      toast("success", "Memory saved");
+      onDone();
+    } catch (e) {
+      setSaveState("error");
+      setErr(e instanceof Error ? e.message : "Save failed");
+    }
+  };
+
+  const remove = () => {
+    if (!composer.editId) return;
+    persist.cancel();
+    askDelete(`Delete memory "${title.trim() || "untitled"}"?`, undefined, async () => {
+      try {
+        await api.memories.remove(composer.editId!);
+        toast("success", "Memory deleted");
+        onDone();
+      } catch (e) {
+        toast("error", e instanceof Error ? e.message : "Delete failed");
+      }
+    });
+  };
+
   return (
     <Modal
       open
@@ -245,11 +299,15 @@ function MemoryModal({ composer, onDone }: { composer: ComposerState; onDone: ()
             <button className="btn primary" onClick={create}>Save memory</button>
           </>
         ) : (
-          <span className="save-state">
-            {saveState === "saving" && <span className="saving">Saving…</span>}
-            {saveState === "saved" && <span className="saved">Saved</span>}
-            {saveState === "error" && <span className="error">Save error — retrying on next change</span>}
-          </span>
+          <>
+            <button className="btn danger" onClick={remove} style={{ marginRight: "auto" }}>Delete</button>
+            <span className="save-state">
+              {saveState === "saving" && <span className="saving">Saving…</span>}
+              {saveState === "saved" && <span className="saved">Saved</span>}
+              {saveState === "error" && <span className="error">Save error — retrying on next change</span>}
+            </span>
+            <button className="btn primary" onClick={saveNow}>Save</button>
+          </>
         )
       }
     >
@@ -309,6 +367,7 @@ function MemoryModal({ composer, onDone }: { composer: ComposerState; onDone: ()
 
 function RuleModal({ composer, onDone }: { composer: ComposerState; onDone: () => void }) {
   const toast = useApp((s) => s.toast);
+  const askDelete = useApp((s) => s.askDelete);
   const projects = useProjectOptions();
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -320,8 +379,7 @@ function RuleModal({ composer, onDone }: { composer: ComposerState; onDone: () =
   useEffect(() => {
     if (composer.projectId) setProjectId(composer.projectId);
     if (!composer.editId) return;
-    api.rules.list(null, 500, 0).then((p) => {
-      const r = p.items.find((x) => x.id === composer.editId);
+    api.rules.get(composer.editId).then((r) => {
       if (r) {
         setTitle(r.title);
         setContent(r.content);
@@ -359,6 +417,19 @@ function RuleModal({ composer, onDone }: { composer: ComposerState; onDone: () =
     }
   };
 
+  const removeRule = () => {
+    if (!composer.editId) return;
+    askDelete(`Delete rule "${title.trim() || "untitled"}"?`, undefined, async () => {
+      try {
+        await api.rules.remove(composer.editId!);
+        toast("success", "Rule deleted");
+        onDone();
+      } catch (e) {
+        toast("error", e instanceof Error ? e.message : "Delete failed");
+      }
+    });
+  };
+
   return (
     <Modal
       open
@@ -366,6 +437,7 @@ function RuleModal({ composer, onDone }: { composer: ComposerState; onDone: () =
       onClose={onDone}
       footer={
         <>
+          {composer.editId && <button className="btn danger" onClick={removeRule} style={{ marginRight: "auto" }}>Delete</button>}
           <button className="btn ghost" onClick={onDone}>Cancel</button>
           <button className="btn primary" onClick={save}>Save</button>
         </>
@@ -412,6 +484,7 @@ function RuleModal({ composer, onDone }: { composer: ComposerState; onDone: () =
 
 function SkillModal({ composer, onDone }: { composer: ComposerState; onDone: () => void }) {
   const toast = useApp((s) => s.toast);
+  const askDelete = useApp((s) => s.askDelete);
   const fileRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -427,8 +500,7 @@ function SkillModal({ composer, onDone }: { composer: ComposerState; onDone: () 
 
   useEffect(() => {
     if (!composer.editId) return;
-    api.skills.list(null, null, 500, 0).then((p) => {
-      const s = p.items.find((x) => x.id === composer.editId);
+    api.skills.get(composer.editId).then((s) => {
       if (s) {
         setName(s.name);
         setDescription(s.description);
@@ -459,6 +531,19 @@ function SkillModal({ composer, onDone }: { composer: ComposerState; onDone: () 
     }
   };
 
+  const removeSkill = () => {
+    if (!composer.editId) return;
+    askDelete(`Delete skill "${name.trim() || "untitled"}"?`, undefined, async () => {
+      try {
+        await api.skills.remove(composer.editId!);
+        toast("success", "Skill deleted");
+        onDone();
+      } catch (e) {
+        toast("error", e instanceof Error ? e.message : "Delete failed");
+      }
+    });
+  };
+
   return (
     <Modal
       open
@@ -467,6 +552,7 @@ function SkillModal({ composer, onDone }: { composer: ComposerState; onDone: () 
       onClose={onDone}
       footer={
         <>
+          {composer.editId && <button className="btn danger" onClick={removeSkill} style={{ marginRight: "auto" }}>Delete</button>}
           <button className="btn ghost" onClick={onDone}>Cancel</button>
           <button className="btn primary" onClick={save}>Save</button>
         </>
@@ -532,6 +618,7 @@ function SkillModal({ composer, onDone }: { composer: ComposerState; onDone: () 
 
 function PersonalModal({ composer, onDone }: { composer: ComposerState; onDone: () => void }) {
   const toast = useApp((s) => s.toast);
+  const askDelete = useApp((s) => s.askDelete);
   const [key, setKey] = useState("");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -539,8 +626,7 @@ function PersonalModal({ composer, onDone }: { composer: ComposerState; onDone: 
 
   useEffect(() => {
     if (!composer.editId) return;
-    api.personal.list().then((items) => {
-      const p = items.find((x) => x.id === composer.editId);
+    api.personal.get(composer.editId).then((p) => {
       if (p) {
         setKey(p.key);
         setTitle(p.title);
@@ -569,6 +655,19 @@ function PersonalModal({ composer, onDone }: { composer: ComposerState; onDone: 
     }
   };
 
+  const removeEntry = () => {
+    if (!composer.editId) return;
+    askDelete(`Delete entry "${title.trim() || key.trim() || "untitled"}"?`, undefined, async () => {
+      try {
+        await api.personal.remove(composer.editId!);
+        toast("success", "Entry deleted");
+        onDone();
+      } catch (e) {
+        toast("error", e instanceof Error ? e.message : "Delete failed");
+      }
+    });
+  };
+
   return (
     <Modal
       open
@@ -576,6 +675,7 @@ function PersonalModal({ composer, onDone }: { composer: ComposerState; onDone: 
       onClose={onDone}
       footer={
         <>
+          {composer.editId && <button className="btn danger" onClick={removeEntry} style={{ marginRight: "auto" }}>Delete</button>}
           <button className="btn ghost" onClick={onDone}>Cancel</button>
           <button className="btn primary" onClick={save}>Save</button>
         </>

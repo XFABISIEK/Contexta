@@ -44,7 +44,7 @@ export function Skills() {
   const groups = useMemo(() => {
     const map = new Map<string, Skill[]>();
     for (const s of items) {
-      const cat = s.category.trim() || "general";
+      const cat = s.category.trim().toLowerCase() || "general";
       if (!map.has(cat)) map.set(cat, []);
       map.get(cat)!.push(s);
     }
