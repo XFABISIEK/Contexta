@@ -45,6 +45,7 @@ export function Information() {
           <div className="information-links">
             <button className="btn primary" onClick={() => openGitHub(REPOSITORY)}><Github /> Repository</button>
             <button className="btn" onClick={() => openGitHub(`${REPOSITORY}/releases`)}><Github /> Releases</button>
+            <button className="btn" onClick={() => openGitHub(`${REPOSITORY}/issues`)}><Github /> Issues</button>
           </div>
           <div className="mono-dim information-url">{REPOSITORY}</div>
         </div>

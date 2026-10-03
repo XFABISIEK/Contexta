@@ -22,6 +22,7 @@ import { AI_NODE_ID, layoutGraph } from "../lib/graph-layout";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import { cx } from "../lib/utils";
+import { useContexaChanged } from "../lib/hooks";
 import type { GraphData, GraphNode } from "../types";
 
 const ALL_TYPES = ["project", "memory", "rule", "skill", "personal"];
@@ -159,19 +160,27 @@ export function GraphView({ projectId }: { projectId?: string }) {
   useEffect(() => setAutoFit(true), [projectId]);
   const onMoveStart = useCallback((e: unknown) => {
     setPanning(true);
+    // Viewport moved: drop the hover tooltip (fixed screen coords) so it
+    // can't float detached from its node; it reappears on next mousemove.
+    cancelAnimationFrame(tipRaf.current);
+    setTip(null);
     if (e) setAutoFit(false);
   }, []);
   const [tip, setTip] = useState<{ id: string; x: number; y: number } | null>(null);
   const tipRaf = useRef(0);
 
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const id = ++loadSeq.current;
     try {
       const g = await api.graph(projectId ? undefined : types, projectId ?? null, limit);
+      if (loadSeq.current !== id) return;
       setData(g);
       // Preserve the selection across reloads (e.g. after an inline save);
       // drop it only when the node is gone.
       setSelected((prev) => (prev && g.nodes.some((n) => n.id === prev.id) ? prev : null));
     } catch (e) {
+      if (loadSeq.current !== id) return;
       toast("error", e instanceof Error ? e.message : "Failed to load graph");
     }
   }, [types, limit, projectId, toast]);
@@ -180,11 +189,7 @@ export function GraphView({ projectId }: { projectId?: string }) {
     load();
   }, [load]);
 
-  useEffect(() => {
-    const onChange = () => load();
-    window.addEventListener("contexa:changed", onChange);
-    return () => window.removeEventListener("contexa:changed", onChange);
-  }, [load]);
+  useContexaChanged(load);
 
   useEffect(() => () => cancelAnimationFrame(tipRaf.current), []);
 

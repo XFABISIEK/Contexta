@@ -4,7 +4,7 @@ import type { GraphEdge, GraphNode } from "../types/index.ts";
 export const AI_NODE_ID = "__contexta_ai__";
 
 type SimNode = SimulationNodeDatum & { id: string };
-type SimLink = SimulationLinkDatum<SimNode> & { hub?: boolean };
+type SimLink = SimulationLinkDatum<SimNode> & { hub?: boolean; dist?: number };
 
 export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[], jitter = 0) {
   const ids = new Set(nodes.map((n) => n.id));
@@ -15,12 +15,18 @@ export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[], jitter = 0) 
       linked.add(e.target);
     }
   }
-  // Hub anchors: projects plus true orphans (no project anchor and no edges).
+  // Hub anchors: projects to the AI center; project members without edges
+  // to their own project node (so they don't pile up at the center);
+  // true orphans (no project anchor and no edges) to the AI center.
   // Anything already wired (e.g. a skill used by a project) hangs off its
-  // own neighbors instead of being torn toward the AI center.
-  const hubLinks = nodes
-    .filter((n) => n.node_type === "project" || (!n.project_id && !linked.has(n.id)))
-    .map((n) => ({ source: AI_NODE_ID, target: n.id }));
+  // own neighbors instead of being torn toward a hub.
+  const hubLinks = nodes.flatMap((n) => {
+    if (n.node_type === "project") return [{ source: AI_NODE_ID, target: n.id, hub: true, dist: 180 }];
+    if (linked.has(n.id)) return [];
+    if (n.project_id && ids.has(n.project_id)) return [{ source: n.project_id, target: n.id, hub: true, dist: 120 }];
+    if (!n.project_id) return [{ source: AI_NODE_ID, target: n.id, hub: true, dist: 180 }];
+    return [];
+  });
   // Deterministic seed: same input -> same layout, no reshuffle on reload.
   // Shake (jitter > 0) scatters the starting ring so the simulation
   // settles into a fresh arrangement on demand.
@@ -33,13 +39,15 @@ export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[], jitter = 0) 
       return { id: n.id, x: Math.cos(a) * 220 + jx, y: Math.sin(a) * 220 + jy };
     }),
   ];
+  // Spread: d3-force rewrites link endpoints to node refs in place —
+  // the returned hubLinks must keep plain string ids for rendering.
   const simLinks: SimLink[] = [
     ...edges.filter((e) => ids.has(e.source) && ids.has(e.target) && e.source !== e.target).map((e) => ({ source: e.source, target: e.target })),
-    ...hubLinks.map((e) => ({ ...e, hub: true })),
+    ...hubLinks.map((e) => ({ ...e })),
   ];
 
   const simulation = forceSimulation(simNodes)
-    .force("link", forceLink<SimNode, SimLink>(simLinks).id((n) => n.id).distance((l) => l.hub ? 180 : 90).strength((l) => l.hub ? 0.18 : 0.5))
+    .force("link", forceLink<SimNode, SimLink>(simLinks).id((n) => n.id).distance((l) => l.dist ?? (l.hub ? 180 : 90)).strength((l) => l.hub ? 0.18 : 0.5))
     .force("charge", forceManyBody<SimNode>().strength((n) => n.id === AI_NODE_ID ? -500 : -95).distanceMax(550))
     .force("collide", forceCollide<SimNode>().radius((n) => n.id === AI_NODE_ID ? 65 : 22))
     .force("center", forceCenter(0, 0))

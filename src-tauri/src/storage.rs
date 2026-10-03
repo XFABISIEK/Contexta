@@ -25,12 +25,20 @@ pub fn configured_path(default: &Path) -> Result<Option<PathBuf>, String> {
 }
 
 pub fn db_path(default: &Path) -> Result<PathBuf, String> {
-    Ok(configured_path(default)?.unwrap_or_else(|| default.to_path_buf()))
+    match configured_path(default) {
+        Ok(opt) => Ok(opt.unwrap_or_else(|| default.to_path_buf())),
+        // Broken config (moved folder, invalid JSON) must not brick startup.
+        Err(e) => {
+            eprintln!("Contexta: ignoring broken storage config: {e}");
+            Ok(default.to_path_buf())
+        }
+    }
 }
 
 pub fn finish_setup(current: &mut Connection, default: &Path, directory: Option<&Path>) -> Result<PathBuf, String> {
     let config = default.with_file_name("storage.json");
-    if config.exists() {
+    // Only a valid config blocks re-setup; a broken one is overwritten below (recovery).
+    if let Ok(Some(_)) = configured_path(default) {
         return Err("Storage has already been configured.".into());
     }
     let target = if let Some(dir) = directory {
@@ -133,5 +141,28 @@ mod tests {
         db::run_migrations(&mut conn).unwrap();
         fs::write(chosen.join("contexta.db"), b"not a database").unwrap();
         assert!(finish_setup(&mut conn, &default, Some(&chosen)).is_err());
+    }
+
+    #[test]
+    fn broken_config_falls_back_to_default_instead_of_bricking_startup() {
+        let root = tempfile::tempdir().unwrap();
+        let default = root.path().join("app").join("contexta.db");
+        fs::create_dir_all(default.parent().unwrap()).unwrap();
+        // Points at a folder that no longer exists (e.g. removed drive).
+        fs::write(default.with_file_name("storage.json"), br#"{"database":"D:/Contexa/contexta.db"}"#).unwrap();
+        assert!(super::configured_path(&default).is_err());
+        assert_eq!(super::db_path(&default).unwrap(), default);
+    }
+
+    #[test]
+    fn broken_config_can_be_fixed_by_setup_again() {
+        let root = tempfile::tempdir().unwrap();
+        let default = root.path().join("app").join("contexta.db");
+        let mut conn = db::open_db(&default).unwrap();
+        db::run_migrations(&mut conn).unwrap();
+        fs::write(default.with_file_name("storage.json"), br#"{"database":"D:/Contexa/contexta.db"}"#).unwrap();
+        let selected = finish_setup(&mut conn, &default, None).unwrap();
+        assert_eq!(selected, default);
+        assert_eq!(db_path(&default).unwrap(), default);
     }
 }

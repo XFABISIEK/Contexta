@@ -24,6 +24,23 @@ test("AI stays centered and every top-level component joins the layout", () => {
   assert.notDeepEqual(positions.get("project"), positions.get("memory"));
 });
 
+test("unlinked project members anchor to their project, not the center", () => {
+  const nodes = [
+    { id: "project", node_type: "project", label: "Project", project_id: null, priority: null },
+    { id: "member", node_type: "memory", label: "Member", project_id: "project", priority: null },
+    { id: "orphan", node_type: "memory", label: "Orphan", project_id: null, priority: null },
+  ];
+  const { hubLinks, positions } = layoutGraph(nodes, []);
+  assert.deepEqual(
+    hubLinks.map((e) => [e.source, e.target]),
+    [[AI_NODE_ID, "project"], ["project", "member"], [AI_NODE_ID, "orphan"]],
+  );
+  const pc = positions.get("project");
+  const mc = positions.get("member");
+  const dx = mc.x - pc.x, dy = mc.y - pc.y;
+  assert.ok(Math.hypot(dx, dy) < 400, "member stays near its project");
+});
+
 test("spread stays bounded so fit/zoom-out works at 100 and 600 nodes", () => {
   for (const count of [100, 600]) {
     const nodes = Array.from({ length: count }, (_, i) => ({

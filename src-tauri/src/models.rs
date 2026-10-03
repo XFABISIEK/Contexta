@@ -246,6 +246,23 @@ pub struct ScanResult {
     pub files: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GrepHit {
+    pub file: String,
+    pub line: i64,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub id: String,
+    pub entity_type: String,
+    pub entity_id: String,
+    pub title: String,
+    pub content: String,
+    pub created_at: String,
+}
+
 pub fn now_ts() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
@@ -270,4 +287,15 @@ pub fn normalize_priority(p: Option<String>) -> String {
         Some("critical") | Some("high") | Some("normal") | Some("low") => p.unwrap(),
         _ => "normal".to_string(),
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileEntry {
+    pub name: String,
+    /// Slash-separated path relative to the project folder.
+    pub path: String,
+    pub is_dir: bool,
+    pub size: i64,
+    pub modified: String,
+    pub children: Option<Vec<FileEntry>>,
 }

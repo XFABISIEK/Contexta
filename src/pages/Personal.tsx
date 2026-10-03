@@ -3,7 +3,8 @@ import { User, Plus, Trash2, ShieldCheck } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import { timeAgo, truncate } from "../lib/utils";
-import { EmptyState } from "../components/Modal";
+import { EmptyState, ListSkeleton } from "../components/Modal";
+import { useContexaChanged } from "../lib/hooks";
 import type { PersonalInfo } from "../types";
 
 export function Personal() {
@@ -12,21 +13,23 @@ export function Personal() {
   const toast = useApp((s) => s.toast);
   const refreshStats = useApp((s) => s.refreshStats);
   const [items, setItems] = useState<PersonalInfo[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       setItems(await api.personal.list());
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "Failed to load personal info");
+    } finally {
+      setLoading(false);
     }
   }, [toast]);
 
   useEffect(() => {
     load();
-    const onChange = () => load();
-    window.addEventListener("contexa:changed", onChange);
-    return () => window.removeEventListener("contexa:changed", onChange);
   }, [load]);
+  useContexaChanged(load);
 
   const remove = (p: PersonalInfo) => {
     askDelete(`Delete entry "${p.title}"?`, undefined, async () => {
@@ -54,7 +57,9 @@ export function Personal() {
           <Plus /> New Entry
         </button>
       </div>
-      {items.length === 0 ? (
+      {loading ? (
+        <ListSkeleton rows={2} />
+      ) : items.length === 0 ? (
         <EmptyState
           icon={User}
           title="No personal information."

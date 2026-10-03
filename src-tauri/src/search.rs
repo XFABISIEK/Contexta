@@ -26,8 +26,9 @@ pub fn sanitize_match(query: &str) -> Option<String> {
     let terms: Vec<String> = query
         .split_whitespace()
         .map(|t| {
-            t.trim_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
-                .replace('"', "")
+            t.chars()
+                .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+                .collect::<String>()
         })
         .filter(|t| !t.is_empty())
         .take(10)
@@ -42,6 +43,132 @@ pub fn sanitize_match(query: &str) -> Option<String> {
             .collect::<Vec<_>>()
             .join(" "),
     )
+}
+
+fn trigram_counts(s: &str) -> HashMap<String, u32> {
+    let chars: Vec<char> = s.to_lowercase().chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
+    let mut map = HashMap::new();
+    for w in chars.split(|c| c.is_whitespace()).filter(|w| w.len() >= 3) {
+        // pad so short words still yield a trigram
+        let padded: Vec<char> = std::iter::once(' ').chain(w.iter().copied()).chain(std::iter::once(' ')).collect();
+        for tri in padded.windows(3) {
+            *map.entry(tri.iter().collect::<String>()).or_insert(0) += 1;
+        }
+    }
+    map
+}
+
+fn cosine(a: &HashMap<String, u32>, b: &HashMap<String, u32>) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let mut dot = 0u64;
+    let (small, big) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+    for (k, va) in small {
+        if let Some(vb) = big.get(k) {
+            dot += (*va as u64) * (*vb as u64);
+        }
+    }
+    let norm = |m: &HashMap<String, u32>| (m.values().map(|v| (*v as u64) * (*v as u64)).sum::<u64>() as f64).sqrt();
+    dot as f64 / (norm(a) * norm(b))
+}
+
+/// Dependency-free semantic-lite: char-trigram cosine between the query and
+/// title + content head of recent entities. Catches typos and near-synonyms
+/// FTS stemming misses. Bounded (120 rows/table, top `cap` hits) — never
+/// materializes whole tables. Feeds the existing `VectorHit` merge path, so a
+/// future embedding backend just replaces this function.
+pub fn fuzzy_hits(
+    conn: &Connection,
+    query: &str,
+    entity_types: &Option<Vec<String>>,
+    project_id: &Option<String>,
+    cap: i64,
+) -> Vec<VectorHit> {
+    let q = trigram_counts(query);
+    if q.is_empty() {
+        return Vec::new();
+    }
+    let allow = |t: &str| -> bool {
+        entity_types.as_ref().map(|v| v.contains(&t.to_string())).unwrap_or(true)
+    };
+    // (entity_type, table, title col, content col, needs project scope)
+    let branches = [
+        ("memory", "memories", "title", "content"),
+        ("rule", "rules", "title", "content"),
+        ("project", "projects", "name", "description"),
+        ("skill", "skills", "name", "description"),
+        ("personal", "personal_information", "title", "content"),
+    ];
+    let mut scored: Vec<VectorHit> = Vec::new();
+    for (etype, table, tcol, ccol) in branches {
+        if !allow(etype) {
+            continue;
+        }
+        let sql = format!(
+            "SELECT id, {tcol} || ' ' || substr({ccol},1,200), project_id FROM {table} ORDER BY updated_at DESC LIMIT 120"
+        );
+        // projects/skills/personal_information have no project_id column
+        let sql = if etype == "memory" || etype == "rule" {
+            sql
+        } else {
+            format!("SELECT id, {tcol} || ' ' || substr({ccol},1,200), NULL FROM {table} ORDER BY updated_at DESC LIMIT 120")
+        };
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let rows = match stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?))
+        }) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        for (id, text, pid) in rows.flatten() {
+            // mirror the FTS scope: project entities only on direct match,
+            // memories/rules filtered by project, skills/personal global
+            if etype == "project" && project_id.as_ref().map(|p| p != &id).unwrap_or(false) {
+                continue;
+            }
+            if (etype == "memory" || etype == "rule") && project_id.is_some() && pid.as_ref() != project_id.as_ref() {
+                continue;
+            }
+            let sim = cosine(&q, &trigram_counts(&text));
+            if sim > 0.12 {
+                scored.push(VectorHit { entity_type: etype.to_string(), entity_id: id, similarity: sim });
+            }
+        }
+    }
+    scored.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(cap.clamp(1, 50) as usize);
+    scored
+}
+
+/// Fetch one entity as an FTS-style row (for fuzzy hits FTS missed).
+fn fetch_row(conn: &Connection, entity_type: &str, entity_id: &str) -> Option<FtsRow> {
+    let (table, tcol, ccol) = match entity_type {
+        "memory" => ("memories", "title", "content"),
+        "rule" => ("rules", "title", "content"),
+        "project" => ("projects", "name", "description"),
+        "skill" => ("skills", "name", "description"),
+        "personal" => ("personal_information", "title", "content"),
+        _ => return None,
+    };
+    let pid_col = if entity_type == "memory" || entity_type == "rule" { "project_id" } else { "NULL" };
+    let sql = format!(
+        "SELECT {tcol}, substr({ccol},1,160), {pid_col} FROM {table} WHERE id = ?1"
+    );
+    conn.query_row(&sql, params![entity_id], |r| {
+        Ok(FtsRow {
+            entity_type: entity_type.to_string(),
+            entity_id: entity_id.to_string(),
+            project_id: r.get(2)?,
+            title: r.get(0)?,
+            snippet: r.get(1)?,
+            rank: 0.0,
+        })
+    })
+    .ok()
 }
 
 fn priority_bonus(priority: Option<&str>) -> f64 {
@@ -280,8 +407,26 @@ pub fn search_hybrid(
     match sanitize_match(&p.query) {
         None => recent_list(conn, &p.entity_types, &p.project_id, limit, offset),
         Some(matcher) => {
-            let (rows, total) = run_fts(conn, &matcher, &p.entity_types, &p.project_id, limit, offset)?;
-            Ok((hydrate(conn, rows, vector)?, total))
+            let (mut rows, total) = run_fts(conn, &matcher, &p.entity_types, &p.project_id, limit, offset)?;
+            let mut merged: Vec<VectorHit> = vector.to_vec();
+            // semantic-lite extras: fuzzy hits FTS missed join as bonus rows
+            let fuzzy = fuzzy_hits(conn, &p.query, &p.entity_types, &p.project_id, 10);
+            if !fuzzy.is_empty() {
+                let have: HashSet<(String, String)> = rows
+                    .iter()
+                    .map(|r| (r.entity_type.clone(), r.entity_id.clone()))
+                    .collect();
+                for v in &fuzzy {
+                    if have.contains(&(v.entity_type.clone(), v.entity_id.clone())) {
+                        continue;
+                    }
+                    if let Some(r) = fetch_row(conn, &v.entity_type, &v.entity_id) {
+                        rows.push(r);
+                    }
+                }
+                merged.extend(fuzzy);
+            }
+            Ok((hydrate(conn, rows, &merged)?, total))
         }
     }
 }
@@ -315,20 +460,22 @@ fn recent_list(
         entity_types.as_ref().map(|v| v.contains(&t.to_string())).unwrap_or(true)
     };
     let mut unions: Vec<String> = Vec::new();
+    // Every branch aliases the same columns: the compound query resolves names
+    // from the first branch, so any single-type filter (e.g. skills only) works.
     if allow("memory") {
-        unions.push("SELECT 'memory' AS et, id, title, substr(content,1,160) AS sn, project_id, priority, updated_at FROM memories".to_string());
+        unions.push("SELECT 'memory' AS et, id AS id, title AS title, substr(content,1,160) AS sn, project_id AS project_id, priority AS priority, updated_at AS updated_at FROM memories".to_string());
     }
     if allow("rule") {
-        unions.push("SELECT 'rule' AS et, id, title, substr(content,1,160) AS sn, project_id, priority, updated_at FROM rules".to_string());
+        unions.push("SELECT 'rule' AS et, id AS id, title AS title, substr(content,1,160) AS sn, project_id AS project_id, priority AS priority, updated_at AS updated_at FROM rules".to_string());
     }
     if allow("project") {
-        unions.push("SELECT 'project' AS et, id, name, substr(description,1,160) AS sn, id, NULL, updated_at FROM projects".to_string());
+        unions.push("SELECT 'project' AS et, id AS id, name AS title, substr(description,1,160) AS sn, id AS project_id, NULL AS priority, updated_at AS updated_at FROM projects".to_string());
     }
     if allow("skill") {
-        unions.push("SELECT 'skill' AS et, id, name, substr(description,1,160) AS sn, NULL, NULL, updated_at FROM skills".to_string());
+        unions.push("SELECT 'skill' AS et, id AS id, name AS title, substr(description,1,160) AS sn, NULL AS project_id, NULL AS priority, updated_at AS updated_at FROM skills".to_string());
     }
     if allow("personal") {
-        unions.push("SELECT 'personal' AS et, id, title, substr(content,1,160) AS sn, NULL, NULL, updated_at FROM personal_information".to_string());
+        unions.push("SELECT 'personal' AS et, id AS id, title AS title, substr(content,1,160) AS sn, NULL AS project_id, NULL AS priority, updated_at AS updated_at FROM personal_information".to_string());
     }
     if unions.is_empty() {
         return Ok((Vec::new(), 0));
@@ -440,6 +587,24 @@ mod tests {
         let (res, total) = search_hybrid(&conn, &p, &[]).unwrap();
         assert!(total > 5);
         assert_eq!(res.len(), 10.min(total as usize));
+    }
+
+    #[test]
+    fn fuzzy_catches_typo_fts_misses() {
+        let conn = seeded();
+        // "authentcation" matches no FTS prefix, trigram cosine still finds JWT auth memory
+        let hits = fuzzy_hits(&conn, "authentcation", &None, &None, 10);
+        assert!(!hits.is_empty());
+        assert!(hits.iter().all(|h| h.similarity > 0.12));
+        let p = SearchParams {
+            query: "authentcation".to_string(),
+            entity_types: None,
+            project_id: None,
+            limit: 20,
+            offset: 0,
+        };
+        let (res, _) = search_hybrid(&conn, &p, &[]).unwrap();
+        assert!(res.iter().any(|r| r.title.contains("JWT") || r.title.to_lowercase().contains("auth")));
     }
 
     #[test]

@@ -42,6 +42,7 @@ export function Modal({ open, title, onClose, children, footer, wide }: ModalPro
             exit={{ opacity: 0, scale: 0.97, y: 8 }}
             transition={{ duration: 0.18 }}
             role="dialog"
+            aria-modal="true"
             aria-label={title}
           >
             <div className="modal-head">
@@ -57,6 +58,16 @@ export function Modal({ open, title, onClose, children, footer, wide }: ModalPro
         </motion.div>
       )}
     </AnimatePresence>
+  );
+}
+
+export function ListSkeleton({ rows = 3, height = 46 }: { rows?: number; height?: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="skeleton" style={{ height, marginBottom: i < rows - 1 ? 6 : 0 }} />
+      ))}
+    </>
   );
 }
 

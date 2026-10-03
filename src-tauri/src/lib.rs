@@ -89,9 +89,9 @@ pub fn run() {
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             #[cfg(desktop)]
-            app.get_webview_window("main")
-                .expect("main window unavailable")
-                .set_icon(tauri::include_image!("./icons/128x128.png"))?;
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_icon(tauri::include_image!("./icons/128x128.png"));
+            }
             let path = {
                 migrate_legacy_storage(app.handle()).map_err(io_err)?;
                 db_path(app.handle()).map_err(io_err)?
@@ -138,6 +138,7 @@ pub fn run() {
             commands::create_connection,
             commands::delete_connection,
             commands::search_everything,
+            commands::suggest_duplicates,
             commands::get_graph,
             commands::get_project_context,
             commands::get_settings,
@@ -145,8 +146,13 @@ pub fn run() {
             commands::export_database,
             commands::export_project,
             commands::import_project,
+            commands::import_snapshot,
             commands::backup_database,
             commands::scan_project_files,
+            commands::list_project_files,
+            commands::read_project_file,
+            commands::grep_project_files,
+            commands::list_history,
             commands::seed_dev_data,
         ])
         .run(tauri::generate_context!())

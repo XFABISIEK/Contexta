@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Database, Copy, Download, Upload, Cpu, Plug } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { Database, Copy, Download, Upload, Cpu, Plug, Command, Search, Plus } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import {
@@ -13,8 +13,9 @@ import {
   type ShortcutAction,
   type ShortcutBinding,
 } from "../lib/shortcuts";
+import { ColorPicker } from "../components/ColorPicker";
 import { Select } from "../components/Select";
-import { downloadText, readFileText } from "../lib/utils";
+import { downloadText, readFileText, ACCENTS, DEFAULT_ACCENT, applyAccent, applyMotion, flashContent } from "../lib/utils";
 import type { DbInfo, Project } from "../types";
 
 const MCP_TOOLS = [
@@ -41,7 +42,7 @@ const MCP_TOOLS = [
   { name: "contexa_add_personal", description: "AI: store a personal entry (stays local).", mapsTo: "create_personal" },
   { name: "contexa_update_personal", description: "AI: replace a personal entry.", mapsTo: "update_personal" },
   { name: "contexa_delete_personal", description: "AI: delete a personal entry.", mapsTo: "delete_personal" },
-  { name: "contexa_link", description: "AI: relate two entities (project uses skill…).", mapsTo: "create_connection" },
+  { name: "contexa_link", description: "AI: relate two entities (project uses skill...).", mapsTo: "create_connection" },
   { name: "contexa_unlink", description: "AI: remove a relation.", mapsTo: "delete_connection" },
   { name: "contexa_scan_project", description: "AI: import agent instruction files from the project folder.", mapsTo: "scan_project_files" },
 ];
@@ -55,9 +56,17 @@ export const mcpClientConfig = (path: string) => JSON.stringify({
   },
 }, null, 2);
 
+const ACTION_ICONS = { palette: Command, search: Search, newMemory: Plus } as const;
+
+function sameBinding(x: ShortcutBinding, y: ShortcutBinding): boolean {
+  return x.ctrl === y.ctrl && x.shift === y.shift && x.alt === y.alt && x.key.toLowerCase() === y.key.toLowerCase();
+}
+
 export function Settings() {
   const toast = useApp((s) => s.toast);
   const refreshStats = useApp((s) => s.refreshStats);
+  const showStatus = useApp((s) => s.showStatus);
+  const setShowStatus = useApp((s) => s.setShowStatus);
   const [dbInfo, setDbInfo] = useState<DbInfo | null>(null);
   const clientConfig = mcpClientConfig(dbInfo?.path ?? "<database path>");
   const [density, setDensity] = useState("comfortable");
@@ -67,9 +76,15 @@ export function Settings() {
   const [ctxOut, setCtxOut] = useState<string | null>(null);
   const [ctxLoading, setCtxLoading] = useState(false);
   const [bindings, setBindings] = useState<Record<ShortcutAction["id"], ShortcutBinding>>(defaultBindings());
+  const [accent, setAccent] = useState(DEFAULT_ACCENT);
+  const [motion, setMotion] = useState(true);
+  const [zoom, setZoom] = useState("100");
+  const isCustom = !ACCENTS.some((a) => a.value === accent);
+  const hexForPicker = /^#[0-9a-f]{6}$/i.test(accent) ? accent : DEFAULT_ACCENT;
   const [capturing, setCapturing] = useState<ShortcutAction["id"] | null>(null);
   const [tab, setTab] = useState<"ui" | "keybinds" | "advanced">("ui");
   const fileRef = useRef<HTMLInputElement>(null);
+  const snapRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api.dbInfo().then(setDbInfo).catch(() => {});
@@ -83,6 +98,19 @@ export function Settings() {
         setDensity(s.density);
         document.documentElement.dataset.density = s.density;
       }
+      if (s.accent) {
+        setAccent(s.accent);
+        applyAccent(s.accent);
+      }
+      if (s.motion === "0") {
+        setMotion(false);
+        applyMotion(false);
+      }
+      if (s.zoom) {
+        setZoom(s.zoom);
+        if (s.zoom !== "100") document.documentElement.dataset.zoom = s.zoom;
+      }
+      if (s.statusbar === "0") setShowStatus(false);
     }).catch(() => {});
   }, []);
 
@@ -103,6 +131,10 @@ export function Settings() {
         toast("error", "Use at least Ctrl or Alt so typing still works");
         return;
       }
+      if (SHORTCUT_ACTIONS.some((a) => a.id !== capturing && sameBinding(bindings[a.id], b))) {
+        toast("error", "That combination is already used");
+        return;
+      }
       saveBinding(capturing, b).then(() => {
         setBindings((prev) => ({ ...prev, [capturing]: b }));
         setCapturing(null);
@@ -112,7 +144,7 @@ export function Settings() {
     };
     window.addEventListener("keydown", onCap, true);
     return () => window.removeEventListener("keydown", onCap, true);
-  }, [capturing, toast]);
+  }, [capturing, toast, bindings]);
 
   const resetShortcuts = async () => {
     const d = defaultBindings();
@@ -129,8 +161,47 @@ export function Settings() {
   const setDensityPref = async (v: string) => {
     setDensity(v);
     document.documentElement.dataset.density = v;
+    flashContent();
     try {
       await api.settings.set("density", v);
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Failed to save preference");
+    }
+  };
+  const setAccentPref = async (v: string) => {
+    setAccent(v);
+    applyAccent(v);
+    flashContent();
+    try {
+      await api.settings.set("accent", v);
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Failed to save preference");
+    }
+  };
+  const setMotionPref = async (v: boolean) => {
+    setMotion(v);
+    applyMotion(v);
+    try {
+      await api.settings.set("motion", v ? "1" : "0");
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Failed to save preference");
+    }
+  };
+  const setZoomPref = async (v: string) => {
+    setZoom(v);
+    if (v === "100") delete document.documentElement.dataset.zoom;
+    else document.documentElement.dataset.zoom = v;
+    flashContent();
+    try {
+      await api.settings.set("zoom", v);
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Failed to save preference");
+    }
+  };
+  const setStatusPref = async (v: boolean) => {
+    setShowStatus(v);
+    try {
+      await api.settings.set("statusbar", v ? "1" : "0");
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "Failed to save preference");
     }
@@ -161,6 +232,30 @@ export function Settings() {
       const text = await readFileText(f);
       const res = await api.importProject(text);
       toast("success", `Imported "${res.project}": ${res.memories} memories, ${res.rules} rules`);
+      refreshStats();
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Import failed");
+    }
+  };
+
+  // Sync snapshot: full export merged insert-or-ignore (never duplicates,
+  // never overwrites). Copy the file to another machine and import it there.
+  const doExportSnapshot = async () => {
+    try {
+      const json = await api.exportDb();
+      downloadText(`contexta-sync-${Date.now()}.json`, json);
+      toast("success", "Sync snapshot exported");
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Export failed");
+    }
+  };
+
+  const doImportSnapshot = async (f: File) => {
+    try {
+      const text = await readFileText(f);
+      const counts = await api.importSnapshot(text);
+      const total = Object.values(counts).reduce((a, b) => a + b, 0);
+      toast("success", total === 0 ? "Snapshot already merged — nothing new" : `Merged snapshot: ${total} new rows`);
       refreshStats();
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "Import failed");
@@ -224,6 +319,7 @@ export function Settings() {
       </div>
 
       {tab === "ui" && (
+      <>
       <div className="section">
         <div className="section-head"><span className="section-title">Appearance</span></div>
         <div className="card">
@@ -234,8 +330,53 @@ export function Settings() {
               <button className={density === "comfortable" ? "active" : ""} onClick={() => setDensityPref("comfortable")}>Comfortable</button>
             </span>
           </div>
+          <div className="kv">
+            <span className="k">Interface scale</span>
+            <span className="seg">
+              {(["90", "100", "110", "125"] as const).map((z) => (
+                <button key={z} className={zoom === z ? "active" : ""} onClick={() => setZoomPref(z)}>{z}%</button>
+              ))}
+            </span>
+          </div>
+          <div className="kv">
+            <span className="k">Accent color</span>
+            <span className="swatches" role="radiogroup" aria-label="Accent color">
+              {ACCENTS.map((a) => (
+                <button
+                  key={a.id}
+                  role="radio"
+                  aria-checked={accent === a.value}
+                  title={a.label}
+                  aria-label={a.label}
+                  className={accent === a.value ? "swatch active" : "swatch"}
+                  style={{ "--sw": a.value } as CSSProperties}
+                  onClick={() => setAccentPref(a.value)}
+                />
+              ))}
+              <ColorPicker
+                value={hexForPicker}
+                active={isCustom}
+                onLive={(v) => { setAccent(v); applyAccent(v); }}
+                onCommit={setAccentPref}
+              />
+            </span>
+          </div>
+          <div className="kv">
+            <span className="k">Animations</span>
+            <label className="check"><input type="checkbox" checked={motion} onChange={(e) => setMotionPref(e.target.checked)} /> Enable transitions and effects</label>
+          </div>
         </div>
       </div>
+      <div className="section">
+        <div className="section-head"><span className="section-title">Workspace</span></div>
+        <div className="card">
+          <div className="kv">
+            <span className="k">Status bar</span>
+            <label className="check"><input type="checkbox" checked={showStatus} onChange={(e) => setStatusPref(e.target.checked)} /> Show the bottom status bar</label>
+          </div>
+        </div>
+      </div>
+      </>
       )}
 
       {tab === "advanced" && (
@@ -264,6 +405,19 @@ export function Settings() {
             <button className="btn sm" onClick={doBackup}><Database size={14} /> Backup now</button>
             <button className="btn sm" onClick={doExport}><Download size={14} /> Export database (JSON)</button>
             <button className="btn sm" onClick={() => fileRef.current?.click()}><Upload size={14} /> Import project (JSON)</button>
+            <button className="btn sm" onClick={doExportSnapshot}><Download size={14} /> Sync snapshot (export)</button>
+            <button className="btn sm" onClick={() => snapRef.current?.click()}><Upload size={14} /> Sync snapshot (import)</button>
+            <input
+              ref={snapRef}
+              type="file"
+              accept="application/json"
+              className="file-input"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) doImportSnapshot(f);
+                e.target.value = "";
+              }}
+            />
             <input
               ref={fileRef}
               type="file"
@@ -281,27 +435,52 @@ export function Settings() {
       )}
 
       {tab === "keybinds" && (
+      <>
       <div className="section">
-        <div className="section-head"><span className="section-title">Shortcuts</span></div>
-        <div className="card">
-          {SHORTCUT_ACTIONS.map((a) => (
-            <div className="kv" key={a.id}>
-              <span className="k">{a.label}<br /><span className="mono-dim">{a.hint}</span></span>
-              <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span className="kbd">{capturing === a.id ? "press keys…" : formatBinding(bindings[a.id])}</span>
+        <div className="section-head">
+          <span className="section-title">Shortcuts</span>
+          <span className="section-action">
+            <button className="btn sm ghost" onClick={resetShortcuts}>Reset all</button>
+          </span>
+        </div>
+        <div className="kb-list">
+          {SHORTCUT_ACTIONS.map((a) => {
+            const Icon = ACTION_ICONS[a.id];
+            const active = capturing === a.id;
+            return (
+              <div className={active ? "kb-row capturing" : "kb-row"} key={a.id}>
+                <span className="kb-ico"><Icon size={15} /></span>
+                <span className="kb-info">
+                  <span className="kb-label">{a.label}</span>
+                  <span className="kb-hint">{a.hint}</span>
+                </span>
+                <span className="kbd kb-key">{active ? "press keys…" : formatBinding(bindings[a.id])}</span>
                 <button
                   className="btn sm"
-                  onClick={() => setCapturing(capturing === a.id ? null : a.id)}
+                  onClick={() => setCapturing(active ? null : a.id)}
                 >
-                  {capturing === a.id ? "Cancel" : "Change"}
+                  {active ? "Cancel" : "Change"}
                 </button>
-              </span>
+              </div>
+            );
+          })}
+        </div>
+        {capturing
+          ? <p className="mono-dim kb-note">Press a combination (Ctrl or Alt required) — Esc cancels.</p>
+          : <p className="mono-dim kb-note">Duplicates are rejected so typing keeps working everywhere.</p>}
+      </div>
+      <div className="section">
+        <div className="section-head"><span className="section-title">Fixed shortcuts</span></div>
+        <div className="kb-list">
+          {FIXED_SHORTCUTS.map((f) => (
+            <div className="kb-row fixed" key={f.keys} title={f.keys}>
+              <span className="kb-label">{f.label}</span>
+              <span className="kbd kb-key">{f.keys}</span>
             </div>
           ))}
-          <div className="kv"><span className="k">Defaults</span><span><button className="btn sm ghost" onClick={resetShortcuts}>Reset all</button></span></div>
-          <div className="kv"><span className="k">Fixed</span><span className="mono-dim">{FIXED_SHORTCUTS.map((f) => `${f.keys} — ${f.label}`).join(" · ")}</span></div>
         </div>
       </div>
+      </>
       )}
 
       {tab === "advanced" && (
@@ -332,7 +511,7 @@ export function Settings() {
         <div className="section-head"><span className="section-title">MCP</span></div>
         <div className="card">
           <p className="mono-dim" style={{ marginTop: 0 }}>
-            <Plug size={12} style={{ display: "inline", verticalAlign: -1 }} /> Model Context Protocol over stdio —
+            <Plug size={12} style={{ display: "inline", verticalAlign: -1 }} /> Model Context Protocol over stdio -
             read <em>and</em> write. Build: <span className="code">cargo build --release --bin contexa-mcp</span>,
             then point any MCP client at the exe. No HTTP server, no network.
           </p>
@@ -344,7 +523,7 @@ export function Settings() {
                   <div className="row-title code" style={{ display: "inline-block" }}>{t.name}</div>
                   <div className="row-sub">{t.description}</div>
                 </div>
-                <div className="row-meta"><span className="mono-dim">→ {t.mapsTo}</span></div>
+                <div className="row-meta"><span className="mono-dim">- {t.mapsTo}</span></div>
               </div>
             ))}
           </div>

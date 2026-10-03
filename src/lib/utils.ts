@@ -1,10 +1,3 @@
-import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
-
-export function cn(...inputs: ClassValue[]): string {
-  return twMerge(clsx(inputs));
-}
-
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }
@@ -37,6 +30,16 @@ export function timeAgo(iso: string): string {
   return `${Math.floor(mo / 12)}y ago`;
 }
 
+export function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "?";
+  if (n < 1024) return `${n} B`;
+  const kb = n / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  return `${(mb / 1024).toFixed(1)} GB`;
+}
+
 export function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, max).trimEnd() + "...";
@@ -65,3 +68,44 @@ export function readFileText(file: File): Promise<string> {
 
 export const PRIORITIES = ["critical", "high", "normal", "low"] as const;
 export const MEMORY_TYPES = ["fact", "decision", "note", "reference", "todo"] as const;
+
+export const DEFAULT_ACCENT = "#3794ff";
+
+export const ACCENTS = [
+  { id: "blue", label: "Blue", value: "#3794ff" },
+  { id: "green", label: "Green", value: "#89d185" },
+  { id: "purple", label: "Purple", value: "#c678dd" },
+  { id: "amber", label: "Amber", value: "#e5c07b" },
+  { id: "red", label: "Red", value: "#f14c4c" },
+] as const;
+
+export function accentDim(hex: string, alpha = 0.14): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return `rgba(55, 148, 255, ${alpha})`;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+export function applyAccent(hex: string) {
+  const root = document.documentElement;
+  root.style.setProperty("--accent", hex);
+  root.style.setProperty("--accent-dim", accentDim(hex));
+}
+
+export function applyMotion(on: boolean) {
+  if (on) {
+    delete document.documentElement.dataset.motion;
+  } else {
+    document.documentElement.dataset.motion = "off";
+  }
+}
+
+// Brief content fade so theme changes feel instant and visible.
+// Skipped when the user disabled animations.
+export function flashContent() {
+  if (document.documentElement.dataset.motion === "off") return;
+  document.querySelector(".content")?.animate(
+    [{ opacity: 0.35 }, { opacity: 1 }],
+    { duration: 260, easing: "ease-out" },
+  );
+}

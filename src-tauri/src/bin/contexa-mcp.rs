@@ -20,6 +20,30 @@ use std::path::PathBuf;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+const SERVER_NAME: &str = "Contexa-MCP";
+const SERVER_ICON_PNG: &[u8] = include_bytes!("../../icons/32x32.png");
+
+// Minimal base64 (RFC 4648, padded): avoids a dependency for a ~2KB icon.
+fn base64_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(ALPHABET[((n >> 18) & 63) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 { ALPHABET[((n >> 6) & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { ALPHABET[(n & 63) as usize] as char } else { '=' });
+    }
+    out
+}
+
+fn server_icon_uri() -> String {
+    format!("data:image/png;base64,{}", base64_encode(SERVER_ICON_PNG))
+}
+
 fn db_path() -> PathBuf {
     // CONTEXA_DB is current; SIMPLEMEMORY_DB still works for older configs.
     for key in ["CONTEXA_DB", "SIMPLEMEMORY_DB"] {
@@ -113,6 +137,8 @@ fn tools_list() -> Value {
             schema(json!({"query": {"type": "string"}}), &["query"])),
         t("contexa_get_graph", "Relation graph: capped, priority-sampled nodes + explicit and belongs_to edges.",
             schema(json!({"entity_types": {"type": "array", "items": {"type": "string"}}, "project_id": {"type": "string"}, "limit": {"type": "integer"}}), &[])),
+        t("contexa_history", "Previous title/content snapshots of a memory or rule (for rollback).",
+            schema(json!({"entity_type": {"type": "string", "enum": ["memory", "rule"]}, "entity_id": {"type": "string"}, "limit": {"type": "integer"}}), &["entity_id"])),
         // ---- write: projects ----
         t("contexa_add_project", "Create a project.",
             schema(json!({"name": {"type": "string"}, "description": {"type": "string"}, "path": {"type": "string"}}), &["name"])),
@@ -162,7 +188,7 @@ fn tools_list() -> Value {
                 &["source_id", "source_type", "target_id", "target_type"])),
         t("contexa_unlink", "Delete a relation by id.",
             schema(json!({"id": {"type": "string"}}), &["id"])),
-        t("contexa_scan_project", "Read agent instruction files (AGENTS.md, CLAUDE.md, Cursor rules…) from the project's local folder into memories.",
+        t("contexa_scan_project", "Import agent instruction files (AGENTS.md, CLAUDE.md, MUSE.md, GEMINI.md, CODEX.md, .muserules, .cursorrules, .github/muse-instructions.md, .cursor/rules, .codex, agents, skills/) from the project's local folder into reference memories.",
             schema(json!({"project": project_prop}), &["project"])),
     ])
 }
@@ -204,8 +230,30 @@ fn str_vec(v: &Value) -> Option<Vec<String>> {
 
 // ---------- dispatch ----------
 
+/// Tools that mutate the database. Gated by the `mcp_write` app setting
+/// (`readonly` blocks them; default when unset is allow).
+const WRITE_TOOLS: &[&str] = &[
+    "contexa_add_project", "contexa_update_project", "contexa_delete_project",
+    "contexa_add_memory", "contexa_update_memory", "contexa_delete_memory",
+    "contexa_add_rule", "contexa_update_rule", "contexa_delete_rule",
+    "contexa_add_skill", "contexa_update_skill", "contexa_delete_skill",
+    "contexa_add_personal", "contexa_update_personal", "contexa_delete_personal",
+    "contexa_link", "contexa_unlink", "contexa_scan_project",
+];
+
+fn write_allowed(conn: &Connection) -> bool {
+    conn.query_row("SELECT value FROM app_settings WHERE key = 'mcp_write'", [], |r| {
+        r.get::<_, String>(0)
+    })
+    .map(|v| v != "readonly")
+    .unwrap_or(true)
+}
+
 fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, String> {
     let args = if args.is_null() { &Value::Null } else { args };
+    if WRITE_TOOLS.contains(&name) && !write_allowed(conn) {
+        return Err("MCP server is in read-only mode (change it in the app: MCP tab)".to_string());
+    }
     match name {
         "contexa_search" => {
             let p = search::SearchParams {
@@ -294,6 +342,15 @@ fn handle_call(conn: &Connection, name: &str, args: &Value) -> Result<Value, Str
             };
             let g = graph::get_graph(conn, &f).map_err(|e| e.to_string())?;
             Ok(text_result(json!(g)))
+        }
+        "contexa_history" => {
+            let et = s(args, "entity_type").unwrap_or_else(|| "memory".to_string());
+            if et != "memory" && et != "rule" {
+                return Err("entity_type must be 'memory' or 'rule'".to_string());
+            }
+            let h = repos::list_history(conn, &et, &req(args, "entity_id")?, opt_int(args, "limit"))
+                .map_err(|e| e.to_string())?;
+            Ok(text_result(json!(h)))
         }
         "contexa_add_project" => {
             let p = repos::create_project(conn, models::NewProject {
@@ -456,7 +513,9 @@ fn handle_message(conn: &Connection, msg: &Value) -> Option<Value> {
         "initialize" => Some(ok(&id, json!({
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "contexa-mcp", "version": VERSION}
+            // `icons` is a 2025-06-18 schema addition; older clients ignore unknown fields.
+            "serverInfo": {"name": SERVER_NAME, "version": VERSION,
+                "icons": [{"src": server_icon_uri(), "mimeType": "image/png", "sizes": ["32x32"]}]}
         }))),
         "ping" => Some(ok(&id, json!({}))),
         "tools/list" => Some(ok(&id, json!({"tools": tools_list()}))),
@@ -576,6 +635,31 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM memories WHERE id = ?1", params![id], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn initialize_advertises_name_and_icon() {
+        let conn = test_conn();
+        let resp = handle_message(
+            &conn,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}),
+        )
+        .unwrap();
+        assert_eq!(resp["result"]["serverInfo"]["name"], "Contexa-MCP");
+        let src = resp["result"]["serverInfo"]["icons"][0]["src"].as_str().unwrap();
+        assert!(src.starts_with("data:image/png;base64,iVBOR"));
+    }
+
+    #[test]
+    fn readonly_mode_blocks_writes() {
+        let conn = test_conn();
+        conn.execute("INSERT INTO app_settings (key, value) VALUES ('mcp_write', 'readonly')", [])
+            .unwrap();
+        assert!(handle_call(&conn, "contexa_add_memory", &json!({"title": "x"})).is_err());
+        assert!(handle_call(&conn, "contexa_search", &json!({"query": "x"})).is_ok());
+        conn.execute("UPDATE app_settings SET value = 'allow' WHERE key = 'mcp_write'", [])
+            .unwrap();
+        assert!(handle_call(&conn, "contexa_add_memory", &json!({"title": "allowed"})).is_ok());
     }
 
     #[test]

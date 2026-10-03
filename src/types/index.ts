@@ -166,8 +166,10 @@ export type View =
   | "rules"
   | "skills"
   | "personal"
+  | "database"
   | "profile"
   | "information"
+  | "mcp"
   | "settings";
 
 export type ComposerKind = "project" | "memory" | "rule" | "skill" | "personal";
@@ -178,4 +180,29 @@ export interface ComposerState {
   editId?: string;
   /** preset project for new memory/rule */
   projectId?: string | null;
+}
+
+export interface FileEntry {
+  name: string;
+  /** Slash-separated path relative to the project folder. */
+  path: string;
+  is_dir: boolean;
+  size: number;
+  modified: string;
+  children: FileEntry[] | null;
+}
+
+export interface GrepHit {
+  file: string;
+  line: number;
+  text: string;
+}
+
+export interface HistoryEntry {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  title: string;
+  content: string;
+  created_at: string;
 }

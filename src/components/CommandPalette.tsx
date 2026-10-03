@@ -12,6 +12,7 @@ import {
   Info,
   CircleUserRound,
   Plus,
+  Plug,
   Search,
   ChevronRight,
 } from "lucide-react";
@@ -47,6 +48,7 @@ export function CommandPalette() {
       { id: "skills", label: "Open Skills", icon: Wrench, run: () => go("skills") },
       { id: "personal", label: "Open Personal", icon: User, run: () => go("personal") },
       { id: "profile", label: "Open Profile", icon: CircleUserRound, run: () => go("profile") },
+      { id: "mcp", label: "Open MCP", icon: Plug, run: () => go("mcp") },
       { id: "information", label: "Open Information", icon: Info, run: () => go("information") },
       { id: "settings", label: "Open Settings", icon: Settings, run: () => go("settings") },
       { id: "new-project", label: "New Project", icon: Plus, run: () => setComposer({ kind: "project" }) },
@@ -68,9 +70,10 @@ export function CommandPalette() {
     if (open) {
       setQuery("");
       setIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 30);
+      const t = setTimeout(() => inputRef.current?.focus(), 30);
+      return () => clearTimeout(t);
     }
-  }, [open ]);
+  }, [open]);
 
   useEffect(() => setIndex(0), [query]);
 

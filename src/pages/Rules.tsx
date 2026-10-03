@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollText, Plus, Trash2, Power } from "lucide-react";
+import { ScrollText, Plus, Trash2, Power, LayoutTemplate } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import { timeAgo, truncate } from "../lib/utils";
-import { EmptyState } from "../components/Modal";
+import { EmptyState, ListSkeleton } from "../components/Modal";
+import { useContexaChanged, useProjectOptions } from "../lib/hooks";
 import { Select } from "../components/Select";
+import { RULE_TEMPLATES, type RuleTemplate } from "../lib/templates";
 import type { Project, Rule } from "../types";
 
 export function Rules() {
@@ -14,30 +16,39 @@ export function Rules() {
   const refreshStats = useApp((s) => s.refreshStats);
   const [items, setItems] = useState<Rule[]>([]);
   const [projectId, setProjectId] = useState("all");
-  const [projects, setProjects] = useState<Project[]>([]);
+  const projects = useProjectOptions();
+  const [loading, setLoading] = useState(true);
+  const [showTemplates, setShowTemplates] = useState(false);
+
+  const addTemplate = async (t: RuleTemplate) => {
+    try {
+      await api.rules.create({ project_id: projectId === "all" ? null : projectId, title: t.title, content: t.content, priority: t.priority });
+      toast("success", `Rule "${t.title}" added`);
+      refreshStats();
+      load(projectId);
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Add failed");
+    }
+  };
 
   const load = useCallback(async (pid: string) => {
+    setLoading(true);
     try {
       const page = await api.rules.list(pid === "all" ? null : pid, 200, 0);
       setItems(page.items);
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "Failed to load rules");
+    } finally {
+      setLoading(false);
     }
   }, [toast]);
-
-  useEffect(() => {
-    api.projects.list(undefined, 200, 0).then((p) => setProjects(p.items)).catch(() => {});
-  }, []);
 
   useEffect(() => {
     load(projectId);
   }, [projectId, load]);
 
-  useEffect(() => {
-    const onChange = () => load(projectId);
-    window.addEventListener("contexa:changed", onChange);
-    return () => window.removeEventListener("contexa:changed", onChange);
-  }, [load, projectId]);
+  const reload = useCallback(() => load(projectId), [load, projectId]);
+  useContexaChanged(reload);
 
   const toggle = async (r: Rule) => {
     try {
@@ -80,11 +91,34 @@ export function Rules() {
           onChange={setProjectId}
           options={[{ value: "all", label: "All projects + global" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
         />
+        <button className="btn" onClick={() => setShowTemplates((v) => !v)}>
+          <LayoutTemplate size={14} /> Templates
+        </button>
         <button className="btn primary" onClick={() => setComposer({ kind: "rule", projectId: projectId === "all" ? null : projectId })}>
           <Plus /> New Rule
         </button>
       </div>
-      {items.length === 0 ? (
+      {showTemplates && (
+        <div className="list" style={{ marginBottom: 12 }}>
+          {RULE_TEMPLATES.map((t) => (
+            <div key={t.title} className="row" style={{ cursor: "default" }}>
+              <div className="row-main">
+                <div className="row-title">{t.title}</div>
+                <div className="row-sub">{t.content}</div>
+              </div>
+              <div className="row-meta">
+                <span className={`badge b-${t.priority}`}>{t.priority}</span>
+                <button className="btn sm" style={{ opacity: 1 }} onClick={() => addTemplate(t)}>
+                  <Plus size={13} /> Add
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {loading ? (
+        <ListSkeleton />
+      ) : items.length === 0 ? (
         <EmptyState
           icon={ScrollText}
           title="No rules found."

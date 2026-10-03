@@ -4,11 +4,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { FolderOpen } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
-import { debounce, MEMORY_TYPES, PRIORITIES } from "../lib/utils";
+import { debounce, MEMORY_TYPES, PRIORITIES, timeAgo, truncate } from "../lib/utils";
 import { Modal } from "./Modal";
 import { Select } from "./Select";
 import { SkillIcon } from "./SkillIcon";
-import type { ComposerState, Memory, Project } from "../types";
+import type { ComposerState, HistoryEntry, Memory, Project } from "../types";
+import { useProjectOptions } from "../lib/hooks";
 
 const projectSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(120),
@@ -39,17 +40,58 @@ const personalSchema = z.object({
   content: z.string().max(50000).default(""),
 });
 
-function useProjectOptions() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  useEffect(() => {
-    api.projects.list(undefined, 200, 0).then((p) => setProjects(p.items)).catch(() => {});
-  }, []);
-  return projects;
-}
-
 function FieldError({ msg }: { msg?: string }) {
   if (!msg) return null;
   return <div className="field-err">{msg}</div>;
+}
+
+function HistoryList({ type, id, onRestore }: {
+  type: string;
+  id: string | undefined;
+  onRestore: (h: { title: string; content: string }) => void;
+}) {
+  const [items, setItems] = useState<HistoryEntry[]>([]);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open || !id) return;
+    let live = true;
+    api.history(type, id, 20).then((h) => {
+      if (live) setItems(h);
+    }).catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [open, type, id]);
+  if (!id) return null;
+  return (
+    <div className="field">
+      <button type="button" className="btn sm ghost" onClick={() => setOpen((o) => !o)}>
+        History ({open ? items.length : "…"})
+      </button>
+      {open && (
+        <div className="list" style={{ marginTop: 8 }}>
+          {items.length === 0 ? (
+            <div className="mono-dim" style={{ padding: 8 }}>No previous versions.</div>
+          ) : (
+            items.map((h) => (
+              <div key={h.id} className="row" style={{ cursor: "default" }}>
+                <div className="row-main">
+                  <div className="row-title">{h.title}</div>
+                  <div className="row-sub">{truncate(h.content, 100) || "—"}</div>
+                </div>
+                <div className="row-meta">
+                  <span className="row-time">{timeAgo(h.created_at)}</span>
+                  <span className="row-actions" style={{ opacity: 1 }}>
+                    <button type="button" className="btn sm" onClick={() => onRestore(h)}>Restore</button>
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /* ---------------- Project ---------------- */
@@ -187,7 +229,7 @@ function MemoryModal({ composer, onDone }: { composer: ComposerState; onDone: ()
         setPriority(m.priority);
         setTags(m.tags.map((t) => t.name).join(", "));
         setSource(m.source);
-        snapshot.current = JSON.stringify([m.title, m.content, m.project_id, m.memory_type, m.priority]);
+        snapshot.current = JSON.stringify([m.title, m.content, m.project_id, m.memory_type, m.priority, m.tags.map((t) => t.name).join(", "), m.source]);
       }
     }).catch((e) => setErr(e.message)).finally(() => setLoaded(true));
   }, [composer.editId, composer.projectId]);
@@ -210,7 +252,7 @@ function MemoryModal({ composer, onDone }: { composer: ComposerState; onDone: ()
   // Autosave on change (edit mode only, skips the initial load).
   useEffect(() => {
     if (isCreate || !loaded || !composer.editId) return;
-    const key = JSON.stringify([title, content, projectId, memoryType, priority]);
+    const key = JSON.stringify([title, content, projectId, memoryType, priority, tags, source]);
     if (key === snapshot.current) return;
     if (!title.trim()) return;
     snapshot.current = key;
@@ -228,6 +270,32 @@ function MemoryModal({ composer, onDone }: { composer: ComposerState; onDone: ()
     source,
     tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
   });
+
+  // Near-duplicate warning (create mode): same hybrid search the MCP uses.
+  const [dups, setDups] = useState<Array<{ entity_id: string; title: string }>>([]);
+  const dupSeq = useRef(0);
+  const checkDups = useMemo(
+    () =>
+      debounce(async (t: string, c: string, excl?: string) => {
+        const id = ++dupSeq.current;
+        if (!t.trim()) {
+          if (dupSeq.current === id) setDups([]);
+          return;
+        }
+        try {
+          const r = await api.duplicates(t, c, excl ?? null);
+          if (dupSeq.current === id) setDups(r);
+        } catch {
+          if (dupSeq.current === id) setDups([]);
+        }
+      }, 500),
+    [],
+  );
+  useEffect(() => () => checkDups.cancel(), [checkDups]);
+  useEffect(() => {
+    if (!isCreate) return;
+    checkDups(title, content, composer.editId);
+  }, [title, content, isCreate, composer.editId, checkDups]);
 
   const create = async () => {
     const parsed = memorySchema.safeParse({ title, content });
@@ -314,6 +382,11 @@ function MemoryModal({ composer, onDone }: { composer: ComposerState; onDone: ()
       <div className="field">
         <label>Title</label>
         <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What should AI remember?" autoFocus />
+        {dups.length > 0 && (
+          <div className="mono-dim" style={{ marginTop: 4 }}>
+            Similar exists: {dups.map((d) => d.title).join(" · ")} — consider updating instead.
+          </div>
+        )}
       </div>
       <div className="field">
         <label>Content</label>
@@ -358,6 +431,9 @@ function MemoryModal({ composer, onDone }: { composer: ComposerState; onDone: ()
         <label>Tags (comma separated)</label>
         <input className="input" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="auth, decision, architecture" />
       </div>
+      {!isCreate && (
+        <HistoryList type="memory" id={composer.editId} onRestore={(h) => { setTitle(h.title); setContent(h.content); }} />
+      )}
       <FieldError msg={err} />
     </Modal>
   );
@@ -475,6 +551,9 @@ function RuleModal({ composer, onDone }: { composer: ComposerState; onDone: () =
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
         Enabled
       </label>
+      {composer.editId && (
+        <HistoryList type="rule" id={composer.editId} onRestore={(h) => { setTitle(h.title); setContent(h.content); }} />
+      )}
       <FieldError msg={err} />
     </Modal>
   );

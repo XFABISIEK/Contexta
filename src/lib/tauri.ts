@@ -4,7 +4,10 @@ import type {
   Connection,
   DashboardStats,
   DbInfo,
+  FileEntry,
   GraphData,
+  GrepHit,
+  HistoryEntry,
   ImportResult,
   Memory,
   Paged,
@@ -23,7 +26,10 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   try {
     return await invoke<T>(cmd, args);
   } catch (e) {
-    throw new Error(typeof e === "string" ? e : `Command ${cmd} failed`);
+    if (typeof e === "string") throw new Error(e);
+    if (e instanceof Error) throw e;
+    const msg = (e as { message?: string } | null)?.message;
+    throw new Error(msg || `Command ${cmd} failed`);
   }
 }
 
@@ -149,6 +155,16 @@ export const api = {
       offset,
     }),
 
+  duplicates: (title: string, content?: string, excludeId?: string | null) =>
+    call<SearchResult[]>("suggest_duplicates", {
+      title,
+      content: content ?? null,
+      excludeId: excludeId ?? null,
+    }),
+
+  history: (entityType: string, entityId: string, limit = 20) =>
+    call<HistoryEntry[]>("list_history", { entityType, entityId, limit }),
+
   graph: (entityTypes?: string[], projectId?: string | null, limit = 300) =>
     call<GraphData>("get_graph", {
       entityTypes: entityTypes ?? null,
@@ -167,6 +183,14 @@ export const api = {
   exportDb: () => call<string>("export_database"),
   exportProject: (id: string) => call<string>("export_project", { id }),
   importProject: (json: string) => call<ImportResult>("import_project", { json }),
+  importSnapshot: (json: string) => call<Record<string, number>>("import_snapshot", { json }),
   backup: () => call<string>("backup_database"),
   scanProject: (projectId: string) => call<ScanResult>("scan_project_files", { projectId }),
+
+  files: {
+    list: (projectId: string) => call<FileEntry[]>("list_project_files", { projectId }),
+    read: (projectId: string, path: string) => call<string>("read_project_file", { projectId, path }),
+    grep: (projectId: string, pattern: string, limit = 50) =>
+      call<GrepHit[]>("grep_project_files", { projectId, pattern, limit }),
+  },
 };

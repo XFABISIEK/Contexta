@@ -33,35 +33,44 @@ export function GlobalSearch() {
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
+  const seq = useRef(0);
 
   const run = useMemo(
     () =>
       debounce(async (q: string) => {
+        const id = ++seq.current;
         if (!q.trim()) {
+          if (seq.current !== id) return;
           setResults([]);
           setLoading(false);
           return;
         }
         try {
           const page = await api.search(q.trim(), undefined, null, 40, 0);
+          if (seq.current !== id) return;
           setResults(page.items);
         } catch {
+          if (seq.current !== id) return;
           setResults([]);
         } finally {
-          setLoading(false);
+          if (seq.current === id) setLoading(false);
         }
       }, 250),
     [],
   );
+
+  useEffect(() => () => run.cancel(), [run]);
 
   useEffect(() => {
     if (open) {
       setQuery("");
       setResults([]);
       setIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 30);
+      seq.current++;
+      const t = setTimeout(() => inputRef.current?.focus(), 30);
+      return () => clearTimeout(t);
     }
-  }, [open ]);
+  }, [open]);
 
   useEffect(() => setIndex(0), [query]);
 

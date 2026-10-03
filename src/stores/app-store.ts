@@ -21,6 +21,7 @@ interface AppState {
   stats: DashboardStats | null;
   dbOk: boolean;
   aiProvider: string | null | undefined;
+  showStatus: boolean;
 
   go: (view: View, projectId?: string | null) => void;
   setPalette: (open: boolean) => void;
@@ -32,6 +33,7 @@ interface AppState {
   dismissToast: (id: number) => void;
   refreshStats: () => Promise<void>;
   setAiProvider: (provider: string | null) => void;
+  setShowStatus: (v: boolean) => void;
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -45,6 +47,7 @@ export const useApp = create<AppState>((set, get) => ({
   stats: null,
   dbOk: false,
   aiProvider: undefined,
+  showStatus: true,
 
   go: (view, projectId) =>
     set({
@@ -66,6 +69,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
   dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.id !== id) }),
   setAiProvider: (aiProvider) => set({ aiProvider }),
+  setShowStatus: (showStatus) => set({ showStatus }),
 
   refreshStats: async () => {
     try {

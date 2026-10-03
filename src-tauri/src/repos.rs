@@ -1,9 +1,9 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::models::{
-    new_id, normalize_priority, now_ts, Connection as ConnectionModel, DashboardStats,
+    new_id, normalize_priority, now_ts, Connection as ConnectionModel, DashboardStats, FileEntry,
     ImportResult, Memory, NewConnection, NewMemory, NewPersonalInfo, NewProject, NewRule,
     NewSkill, Paged, PersonalInfo, Project, Rule, Skill, Tag, UpdateMemory,
 };
@@ -172,6 +172,43 @@ fn touch_project(conn: &Connection, project_id: &Option<String>) {
             params![now_ts(), pid],
         );
     }
+}
+
+/// Snapshot pre-update title/content; keeps the last 20 per entity.
+fn record_history(conn: &Connection, entity_type: &str, entity_id: &str, title: &str, content: &str) {
+    let _ = conn.execute(
+        "INSERT INTO entity_history (id, entity_type, entity_id, title, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![new_id(), entity_type, entity_id, title, content, now_ts()],
+    );
+    let _ = conn.execute(
+        "DELETE FROM entity_history WHERE entity_id = ?1 AND id NOT IN \
+        (SELECT id FROM entity_history WHERE entity_id = ?1 ORDER BY created_at DESC LIMIT 20)",
+        params![entity_id],
+    );
+}
+
+pub fn list_history(
+    conn: &Connection,
+    entity_type: &str,
+    entity_id: &str,
+    limit: Option<i64>,
+) -> rusqlite::Result<Vec<crate::models::HistoryEntry>> {
+    let limit = limit.unwrap_or(20).clamp(1, 50);
+    let mut stmt = conn.prepare(
+        "SELECT id, entity_type, entity_id, title, content, created_at FROM entity_history \
+        WHERE entity_type = ?1 AND entity_id = ?2 ORDER BY created_at DESC LIMIT ?3",
+    )?;
+    let rows = stmt.query_map(params![entity_type, entity_id, limit], |r| {
+        Ok(crate::models::HistoryEntry {
+            id: r.get(0)?,
+            entity_type: r.get(1)?,
+            entity_id: r.get(2)?,
+            title: r.get(3)?,
+            content: r.get(4)?,
+            created_at: r.get(5)?,
+        })
+    })?;
+    rows.collect()
 }
 
 // ---------- tags ----------
@@ -381,19 +418,21 @@ pub fn update_memory(conn: &Connection, id: &str, input: UpdateMemory) -> Result
         Some(v) => v.filter(|s| !s.is_empty()),
     };
     let ts = now_ts();
+    let priority: Option<String> = input.priority.map(|p| normalize_priority(Some(p)));
     let n = conn
         .execute(
             "UPDATE memories SET title = COALESCE(?1, title), content = COALESCE(?2, content), project_id = ?3, \
             memory_type = COALESCE(?4, memory_type), priority = COALESCE(?5, priority), source = COALESCE(?6, source), updated_at = ?7 WHERE id = ?8",
             params![
                 input.title, input.content, project_id,
-                input.memory_type, Some(normalize_priority(input.priority)), input.source, ts, id
+                input.memory_type, priority, input.source, ts, id
             ],
         )
         .map_err(|e| e.to_string())?;
     if n == 0 {
         return Err("Memory not found".to_string());
     }
+    record_history(conn, "memory", id, &cur.title, &cur.content);
     if let Some(tags) = input.tags {
         set_memory_tags(conn, id, &tags).map_err(|e| e.to_string())?;
     }
@@ -466,17 +505,26 @@ pub fn update_rule(conn: &Connection, id: &str, input: NewRule) -> Result<Rule, 
     if input.title.trim().is_empty() {
         return Err("Rule title must not be empty".to_string());
     }
+    let old: Option<(String, String)> = conn
+        .query_row("SELECT title, content FROM rules WHERE id = ?1", params![id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .ok();
     let ts = now_ts();
+    let pid = input.project_id.clone().filter(|s| !s.is_empty());
     let n = conn
         .execute(
-            "UPDATE rules SET title = ?1, content = ?2, priority = ?3, enabled = ?4, updated_at = ?5 WHERE id = ?6",
-            params![input.title, input.content, normalize_priority(input.priority), input.enabled.unwrap_or(true) as i64, ts, id],
+            "UPDATE rules SET project_id = ?1, title = ?2, content = ?3, priority = ?4, enabled = ?5, updated_at = ?6 WHERE id = ?7",
+            params![pid, input.title, input.content, normalize_priority(input.priority), input.enabled.unwrap_or(true) as i64, ts, id],
         )
         .map_err(|e| e.to_string())?;
     if n == 0 {
         return Err("Rule not found".to_string());
     }
-    touch_project(conn, &input.project_id);
+    if let Some((t, c)) = old {
+        record_history(conn, "rule", id, &t, &c);
+    }
+    touch_project(conn, &pid);
     let mut stmt = conn.prepare("SELECT id, project_id, title, content, priority, enabled, created_at, updated_at FROM rules WHERE id = ?1").map_err(|e| e.to_string())?;
     stmt.query_row(params![id], |r| {
         Ok(Rule {
@@ -684,6 +732,12 @@ pub fn create_personal(conn: &Connection, input: NewPersonalInfo) -> Result<Pers
 }
 
 pub fn update_personal(conn: &Connection, id: &str, input: NewPersonalInfo) -> Result<PersonalInfo, String> {
+    if input.key.trim().is_empty() {
+        return Err("Key must not be empty".to_string());
+    }
+    if input.title.trim().is_empty() {
+        return Err("Title must not be empty".to_string());
+    }
     let ts = now_ts();
     let n = conn
         .execute(
@@ -694,7 +748,10 @@ pub fn update_personal(conn: &Connection, id: &str, input: NewPersonalInfo) -> R
     if n == 0 {
         return Err("Entry not found".to_string());
     }
-    Ok(PersonalInfo { id: id.to_string(), key: input.key, title: input.title, content: input.content, created_at: String::new(), updated_at: ts })
+    let created_at: String = conn
+        .query_row("SELECT created_at FROM personal_information WHERE id = ?1", params![id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    Ok(PersonalInfo { id: id.to_string(), key: input.key.trim().to_string(), title: input.title.trim().to_string(), content: input.content, created_at, updated_at: ts })
 }
 
 pub fn delete_personal(conn: &Connection, id: &str) -> Result<(), String> {
@@ -835,6 +892,168 @@ pub fn export_all(conn: &Connection) -> Result<String, String> {
     .map_err(|e| e.to_string())
 }
 
+/// Merge a full `export_all` snapshot: insert-or-ignore by id, so re-importing
+/// the same file (or a snapshot from another machine) never duplicates or
+/// overwrites. Memories/rules whose project is missing become unassigned.
+pub fn import_all(conn: &Connection, json: &str) -> Result<serde_json::Value, String> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("Invalid JSON: {}", e))?;
+    if v.get("version").and_then(|x| x.as_i64()) != Some(1) {
+        return Err("Unsupported snapshot version".to_string());
+    }
+    let strf = |o: &serde_json::Value, k: &str| o.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let arr = |k: &str| v.get(k).and_then(|x| x.as_array()).cloned().unwrap_or_default();
+
+    let mut inserted = std::collections::HashMap::new();
+    let mut ins = |table: &str, count: usize| {
+        inserted.insert(table.to_string(), count as i64);
+    };
+
+    let mut c: usize = 0;
+    for p in arr("projects") {
+        c += conn.execute(
+            "INSERT OR IGNORE INTO projects (id, name, description, path, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                strf(&p, "id"), strf(&p, "name"),
+                p.get("description").and_then(|x| x.as_str()).unwrap_or(""),
+                p.get("path").and_then(|x| x.as_str()).unwrap_or(""),
+                strf(&p, "created_at"), strf(&p, "updated_at"),
+            ],
+        ).map_err(|e| e.to_string())?;
+    }
+    ins("projects", c);
+
+    // project ids that exist after the merge (for detach fallback)
+    let mut existing = std::collections::HashSet::new();
+    {
+        let mut stmt = conn.prepare("SELECT id FROM projects").map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
+        for id in rows.flatten() {
+            existing.insert(id);
+        }
+    }
+    let pid = |o: &serde_json::Value| match o.get("project_id").and_then(|x| x.as_str()) {
+        Some(id) if existing.contains(id) => Some(id.to_string()),
+        _ => None,
+    };
+
+    c = 0usize;
+    let mut tag_links: Vec<(String, String)> = Vec::new();
+    for m in arr("memories") {
+        if strf(&m, "title").trim().is_empty() {
+            continue;
+        }
+        c += conn.execute(
+            "INSERT OR IGNORE INTO memories (id, project_id, title, content, memory_type, priority, source, created_at, updated_at) \
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                strf(&m, "id"), pid(&m), strf(&m, "title"),
+                m.get("content").and_then(|x| x.as_str()).unwrap_or(""),
+                m.get("memory_type").and_then(|x| x.as_str()).unwrap_or("fact"),
+                m.get("priority").and_then(|x| x.as_str()).unwrap_or("normal"),
+                m.get("source").and_then(|x| x.as_str()).unwrap_or("import"),
+                strf(&m, "created_at"), strf(&m, "updated_at"),
+            ],
+        ).map_err(|e| e.to_string())?;
+        if let Some(tags) = m.get("tags").and_then(|x| x.as_array()) {
+            for t in tags {
+                if let Some(name) = t.get("name").and_then(|x| x.as_str()) {
+                    tag_links.push((strf(&m, "id"), name.to_string()));
+                }
+            }
+        }
+    }
+    ins("memories", c);
+
+    c = 0usize;
+    for r in arr("rules") {
+        if strf(&r, "title").trim().is_empty() {
+            continue;
+        }
+        c += conn.execute(
+            "INSERT OR IGNORE INTO rules (id, project_id, title, content, priority, enabled, created_at, updated_at) \
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                strf(&r, "id"), pid(&r), strf(&r, "title"),
+                r.get("content").and_then(|x| x.as_str()).unwrap_or(""),
+                r.get("priority").and_then(|x| x.as_str()).unwrap_or("normal"),
+                r.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true) as i64,
+                strf(&r, "created_at"), strf(&r, "updated_at"),
+            ],
+        ).map_err(|e| e.to_string())?;
+    }
+    ins("rules", c);
+
+    c = 0usize;
+    for s in arr("skills") {
+        if strf(&s, "name").trim().is_empty() {
+            continue;
+        }
+        c += conn.execute(
+            "INSERT OR IGNORE INTO skills (id, name, description, content, category, icon, created_at, updated_at) \
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                strf(&s, "id"), strf(&s, "name"),
+                s.get("description").and_then(|x| x.as_str()).unwrap_or(""),
+                s.get("content").and_then(|x| x.as_str()).unwrap_or(""),
+                s.get("category").and_then(|x| x.as_str()).unwrap_or("general"),
+                s.get("icon").and_then(|x| x.as_str()).unwrap_or(""),
+                strf(&s, "created_at"), strf(&s, "updated_at"),
+            ],
+        ).map_err(|e| e.to_string())?;
+    }
+    ins("skills", c);
+
+    c = 0usize;
+    for p in arr("personal") {
+        if strf(&p, "key").trim().is_empty() {
+            continue;
+        }
+        c += conn.execute(
+            "INSERT OR IGNORE INTO personal_information (id, key, title, content, created_at, updated_at) \
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                strf(&p, "id"), strf(&p, "key"), strf(&p, "title"),
+                p.get("content").and_then(|x| x.as_str()).unwrap_or(""),
+                strf(&p, "created_at"), strf(&p, "updated_at"),
+            ],
+        ).map_err(|e| e.to_string())?;
+    }
+    ins("personal", c);
+
+    c = 0usize;
+    for t in arr("tags") {
+        if let Some(name) = t.get("name").and_then(|x| x.as_str()) {
+            c += conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", params![name])
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    for (mid, name) in tag_links {
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO memory_tags (memory_id, tag_id) SELECT ?1, id FROM tags WHERE name = ?2",
+            params![mid, name],
+        );
+    }
+    ins("tags", c);
+
+    c = 0usize;
+    for x in arr("connections") {
+        c += conn.execute(
+            "INSERT OR IGNORE INTO connections (id, source_id, source_type, target_id, target_type, relationship, weight, created_at) \
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                strf(&x, "id"), strf(&x, "source_id"), strf(&x, "source_type"),
+                strf(&x, "target_id"), strf(&x, "target_type"),
+                x.get("relationship").and_then(|x| x.as_str()).unwrap_or("related"),
+                x.get("weight").and_then(|x| x.as_f64()).unwrap_or(1.0),
+                strf(&x, "created_at"),
+            ],
+        ).map_err(|e| e.to_string())?;
+    }
+    ins("connections", c);
+
+    Ok(serde_json::Value::Object(inserted.into_iter().map(|(k, v)| (k, serde_json::Value::from(v))).collect()))
+}
+
 pub fn export_project(conn: &Connection, id: &str) -> Result<String, String> {
     let project = get_project(conn, id).map_err(|e| e.to_string())?.ok_or_else(|| "Project not found".to_string())?;
     let memories = list_memories(conn, Some(id.to_string()), None, None, None, Some(100000), Some(0))?;
@@ -942,6 +1161,9 @@ const MAX_SCAN_FILES: usize = 500;
 const MAX_FILE_BYTES: usize = 250_000;
 const MAX_SCAN_DEPTH: usize = 4;
 
+// Dependency and VCS folders must not eat the file cap or pollute AI context.
+const SKIP_DIRS: &[&str] = &["node_modules", ".git", "target", "dist", "build", ".next", "vendor", "__pycache__"];
+
 fn is_text_doc(fp: &Path) -> bool {
     let ext = fp
         .extension()
@@ -975,6 +1197,11 @@ fn walk_recursive(root: &Path, dir: &Path, depth: usize, rels: &mut Vec<String>)
             return;
         }
         if fp.is_dir() {
+            if let Some(name) = fp.file_name().and_then(|n| n.to_str()) {
+                if SKIP_DIRS.contains(&name.to_lowercase().as_str()) {
+                    continue;
+                }
+            }
             walk_recursive(root, &fp, depth + 1, rels);
         } else {
             push_candidate(root, &fp, rels);
@@ -990,14 +1217,8 @@ fn ai_context_candidates(root: &Path) -> Vec<String> {
         }
     }
     for d in AI_CONTEXT_DIRS {
-        let dir = root.join(d);
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        for entry in entries.flatten() {
-            push_candidate(root, &entry.path(), &mut rels);
-        }
+        // Recursive like skills: nested rule folders (e.g. .cursor/rules/nested/) count too.
+        walk_recursive(root, &root.join(d), 1, &mut rels);
     }
     for d in SKILL_DIRS {
         walk_recursive(root, &root.join(d), 1, &mut rels);
@@ -1042,15 +1263,28 @@ pub fn scan_project_files(conn: &Connection, project_id: &str) -> Result<crate::
             continue;
         }
         let title = format!("{}/{}", project.name, rel);
-        let exists: i64 = conn
+        let old_content: Option<String> = conn
             .query_row(
-                "SELECT COUNT(*) FROM memories WHERE project_id = ?1 AND title = ?2",
+                "SELECT content FROM memories WHERE project_id = ?1 AND title = ?2",
                 params![project.id, title],
                 |r| r.get(0),
             )
+            .optional()
             .map_err(|e| e.to_string())?;
-        if exists > 0 {
-            skipped += 1;
+        if let Some(old) = old_content {
+            if old == text {
+                skipped += 1;
+                continue;
+            }
+            // Source file changed since the last scan: refresh instead of duplicating.
+            conn.execute(
+                "UPDATE memories SET content = ?1, updated_at = ?2 WHERE project_id = ?3 AND title = ?4",
+                params![text, now_ts(), project.id, title],
+            )
+            .map_err(|e| e.to_string())?;
+            touch_project(conn, &Some(project.id.clone()));
+            imported += 1;
+            files.push(rel);
             continue;
         }
         create_memory(
@@ -1069,4 +1303,293 @@ pub fn scan_project_files(conn: &Connection, project_id: &str) -> Result<crate::
         files.push(rel);
     }
     Ok(crate::models::ScanResult { scanned, imported, skipped, files })
+}
+
+// ---------- project file explorer ----------
+
+const MAX_FILE_ENTRIES: usize = 2000;
+const MAX_FILE_DEPTH: usize = 6;
+const MAX_PREVIEW_BYTES: u64 = 100_000;
+
+fn sort_entries(out: &mut Vec<FileEntry>) {
+    out.sort_by(|a, b| (!a.is_dir, a.name.to_lowercase()).cmp(&(!b.is_dir, b.name.to_lowercase())));
+}
+
+fn project_root(conn: &Connection, project_id: &str) -> Result<PathBuf, String> {
+    let project = get_project(conn, project_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Project not found".to_string())?;
+    let dir = project.path.trim().to_string();
+    if dir.is_empty() {
+        return Err("Set the project folder first (Edit project -> Local folder)".to_string());
+    }
+    let root = Path::new(&dir)
+        .canonicalize()
+        .map_err(|_| format!("Project folder not found: {}", dir))?;
+    if !root.is_dir() {
+        return Err(format!("Project folder not found: {}", dir));
+    }
+    Ok(root)
+}
+
+fn file_modified(meta: &std::fs::Metadata) -> String {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|d| chrono::DateTime::from_timestamp(d.as_secs() as i64, 0))
+        .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        .unwrap_or_default()
+}
+
+fn push_entry(out: &mut Vec<FileEntry>, budget: &mut usize, fp: &Path, rel: String, depth: usize) {
+    if *budget == 0 {
+        return;
+    }
+    if fp.is_dir() {
+        if let Some(n) = fp.file_name().and_then(|n| n.to_str()) {
+            if SKIP_DIRS.contains(&n.to_lowercase().as_str()) {
+                return;
+            }
+        }
+    }
+    if let Some(e) = file_entry(fp, rel, depth, budget) {
+        *budget -= 1;
+        out.push(e);
+    }
+}
+
+fn file_entry(path: &Path, rel: String, depth: usize, budget: &mut usize) -> Option<FileEntry> {
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    if meta.file_type().is_symlink() {
+        return None;
+    }
+    let name = path.file_name()?.to_string_lossy().to_string();
+    if !meta.is_dir() {
+        return Some(FileEntry {
+            name,
+            path: rel,
+            is_dir: false,
+            size: meta.len() as i64,
+            modified: file_modified(&meta),
+            children: None,
+        });
+    }
+    let mut children: Vec<FileEntry> = Vec::new();
+    if depth < MAX_FILE_DEPTH {
+        if let Ok(entries) = std::fs::read_dir(path) {
+            let mut fps: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+            fps.sort();
+            for fp in fps {
+                if *budget == 0 {
+                    break;
+                }
+                let child = format!("{}/{}", rel, fp.file_name()?.to_string_lossy().replace("\\", "/"));
+                push_entry(&mut children, budget, &fp, child, depth + 1);
+            }
+        }
+    }
+    sort_entries(&mut children);
+    Some(FileEntry {
+        name,
+        path: rel,
+        is_dir: true,
+        size: 0,
+        modified: file_modified(&meta),
+        children: Some(children),
+    })
+}
+
+/// Explorer tree for the project folder: dirs first, capped and junk-free.
+pub fn list_project_files(conn: &Connection, project_id: &str) -> Result<Vec<FileEntry>, String> {
+    let root = project_root(conn, project_id)?;
+    let mut budget = MAX_FILE_ENTRIES;
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&root) {
+        let mut fps: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+        fps.sort();
+        for fp in fps {
+            if budget == 0 {
+                break;
+            }
+            let rel = fp
+                .file_name()
+                .map(|n| n.to_string_lossy().replace("\\", "/"))
+                .unwrap_or_default();
+            push_entry(&mut out, &mut budget, &fp, rel, 1);
+        }
+    }
+    sort_entries(&mut out);
+    Ok(out)
+}
+
+/// Capped text preview. Binary, oversized and out-of-root files are rejected.
+pub fn read_project_file(conn: &Connection, project_id: &str, rel: &str) -> Result<String, String> {
+    let root = project_root(conn, project_id)?;
+    let canon = root
+        .join(rel)
+        .canonicalize()
+        .map_err(|_| "File not found".to_string())?;
+    if !canon.starts_with(&root) {
+        return Err("File is outside the project folder".to_string());
+    }
+    let meta = std::fs::metadata(&canon).map_err(|_| "File not found".to_string())?;
+    if !meta.is_file() {
+        return Err("Not a file".to_string());
+    }
+    if meta.len() > MAX_PREVIEW_BYTES {
+        return Err(format!("File is too large to preview ({} KB)", meta.len() / 1024));
+    }
+    let bytes = std::fs::read(&canon).map_err(|e| e.to_string())?;
+    if bytes.contains(&0) {
+        return Err("Binary file, preview unavailable".to_string());
+    }
+    String::from_utf8(bytes).map_err(|_| "File is not valid text".to_string())
+}
+
+/// Case-insensitive substring search over project text files.
+/// Same caps and junk-dir rules as the explorer; binary/oversized files skipped.
+pub fn grep_project_files(
+    conn: &Connection,
+    project_id: &str,
+    pattern: &str,
+    limit: i64,
+) -> Result<Vec<crate::models::GrepHit>, String> {
+    let needle = pattern.trim().to_lowercase();
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
+    let cap = limit.clamp(1, 100) as usize;
+    let root = project_root(conn, project_id)?;
+    let mut rels: Vec<String> = Vec::new();
+    walk_recursive(&root, &root, 0, &mut rels);
+    let mut hits = Vec::new();
+    for rel in rels {
+        if hits.len() >= cap {
+            break;
+        }
+        let canon = match root.join(&rel).canonicalize() {
+            Ok(c) if c.starts_with(&root) => c,
+            _ => continue,
+        };
+        let bytes = match std::fs::read(&canon) {
+            Ok(b) if b.len() <= MAX_FILE_BYTES && !b.contains(&0) => b,
+            _ => continue,
+        };
+        let text = String::from_utf8_lossy(&bytes);
+        for (i, line) in text.lines().enumerate() {
+            if hits.len() >= cap {
+                break;
+            }
+            if line.to_lowercase().contains(&needle) {
+                let snippet: String = line.trim().chars().take(200).collect();
+                hits.push(crate::models::GrepHit {
+                    file: rel.clone(),
+                    line: i as i64 + 1,
+                    text: snippet,
+                });
+            }
+        }
+    }
+    Ok(hits)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{NewMemory, NewProject, NewRule, UpdateMemory};
+
+    fn mem_db() -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::run_migrations(&mut conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn history_snapshot_on_update() {
+        let conn = mem_db();
+        let m = create_memory(
+            &conn,
+            NewMemory {
+                project_id: None,
+                title: "T".to_string(),
+                content: "v1".to_string(),
+                memory_type: None,
+                priority: None,
+                source: None,
+                tags: None,
+            },
+        )
+        .unwrap();
+        update_memory(
+            &conn,
+            &m.id,
+            UpdateMemory {
+                title: None,
+                content: Some("v2".to_string()),
+                project_id: None,
+                memory_type: None,
+                priority: None,
+                source: None,
+                tags: None,
+            },
+        )
+        .unwrap();
+        let h = list_history(&conn, "memory", &m.id, None).unwrap();
+        assert_eq!(h.len(), 1);
+        assert_eq!(h[0].content, "v1");
+    }
+
+    #[test]
+    fn import_all_merges_without_duplicates() {
+        let src = mem_db();
+        let p = create_project(
+            &src,
+            NewProject { name: "P".to_string(), description: None, path: None },
+        )
+        .unwrap();
+        create_memory(
+            &src,
+            NewMemory {
+                project_id: Some(p.id.clone()),
+                title: "M".to_string(),
+                content: "c".to_string(),
+                memory_type: None,
+                priority: None,
+                source: None,
+                tags: Some(vec!["t".to_string()]),
+            },
+        )
+        .unwrap();
+        create_rule(
+            &src,
+            NewRule {
+                project_id: Some(p.id.clone()),
+                title: "R".to_string(),
+                content: "c".to_string(),
+                priority: None,
+                enabled: None,
+            },
+        )
+        .unwrap();
+        let snap = export_all(&src).unwrap();
+
+        let dst = mem_db();
+        let c1 = import_all(&dst, &snap).unwrap();
+        let num = |k: &str| c1.get(k).and_then(|v| v.as_i64()).unwrap_or(0);
+        assert_eq!(num("projects"), 1);
+        assert_eq!(num("memories"), 1);
+        assert_eq!(num("rules"), 1);
+        // memories keep their project link and tags after a merge
+        let kept: Option<String> = dst
+            .query_row("SELECT project_id FROM memories WHERE title = 'M'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, Some(p.id.clone()));
+        let tags: i64 = dst
+            .query_row("SELECT COUNT(*) FROM memory_tags", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(tags, 1);
+
+        let c2 = import_all(&dst, &snap).unwrap();
+        assert!(c2.as_object().unwrap().values().all(|v| v.as_i64().unwrap_or(1) == 0));
+    }
 }

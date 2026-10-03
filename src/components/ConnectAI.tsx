@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Copy, Check, Plug } from "lucide-react";
 import { api } from "../lib/tauri";
-import { mcpClientConfig } from "../pages/Settings";
+import { mcpClientConfig } from "../lib/mcp";
 
 const AGENT_PROMPT = `You are working in a project tracked by Contexta, a local knowledge base exposed via MCP tools (contexa_*).
 
@@ -9,6 +9,7 @@ At the start of each task:
 1. Call contexa_get_project_context with { project: "<name>", query: "<task>", max_results: 10 }.
 2. Follow the returned critical rules first; reuse the listed skills instead of reinventing them.
 3. Use contexa_search before asking the user for facts the tools can return.
+4. If the project folder holds agent instruction files (AGENTS.md, CLAUDE.md, MUSE.md, GEMINI.md, CODEX.md, .cursor/rules, skills/), import them once with contexa_scan_project.
 
 While working:
 - Store durable decisions with contexa_add_memory (priority: critical, high, normal, low).
@@ -74,7 +75,7 @@ export function ConnectAI({ onComplete }: { onComplete: () => void }) {
         <CopyBlock label="MCP client config" text={mcpClientConfig(dbPath)} />
         <CopyBlock label="Agent prompt" text={AGENT_PROMPT} />
         <div className="ai-picker-footer">
-          <span className="mono-dim">You can re-copy both later in Settings → MCP.</span>
+          <span className="mono-dim">You can re-copy both later in the MCP tab.</span>
           <button className="btn primary" type="button" disabled={busy} onClick={finish}>
             {busy ? "Saving…" : "Continue"}
           </button>

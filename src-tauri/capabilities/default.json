@@ -15,7 +15,8 @@
       "identifier": "opener:allow-open-url",
       "allow": [
         { "url": "https://github.com/XFABISIEK/Contexa" },
-        { "url": "https://github.com/XFABISIEK/Contexa/releases" }
+        { "url": "https://github.com/XFABISIEK/Contexa/releases" },
+        { "url": "https://github.com/XFABISIEK/Contexa/issues" }
       ]
     }
   ]

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Brain, Plus, Pencil, Trash2, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import { debounce, timeAgo, truncate } from "../lib/utils";
-import { EmptyState } from "../components/Modal";
+import { EmptyState, ListSkeleton } from "../components/Modal";
+import { useContexaChanged, useProjectOptions } from "../lib/hooks";
 import { Select } from "../components/Select";
 import type { Memory, Project } from "../types";
 
@@ -21,11 +22,12 @@ export function Memories() {
   const [projectId, setProjectId] = useState("all");
   const [memoryType, setMemoryType] = useState("all");
   const [priority, setPriority] = useState("all");
-  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const seq = useRef(0);
   const load = useCallback(
     async (o: number, q: string, pid: string, mt: string, pr: string) => {
+      const id = ++seq.current;
       setLoading(true);
       try {
         const page = await api.memories.list({
@@ -36,41 +38,40 @@ export function Memories() {
           limit: PAGE_SIZE,
           offset: o,
         });
+        if (seq.current !== id) return;
         setItems(page.items);
         setTotal(page.total);
       } catch (e) {
+        if (seq.current !== id) return;
         toast("error", e instanceof Error ? e.message : "Failed to load memories");
       } finally {
-        setLoading(false);
+        if (seq.current === id) setLoading(false);
       }
     },
     [toast],
   );
 
-  const debounced = useCallback(
-    (fn: () => void) => debounce(fn, 300)(),
-    [],
+  const debouncedLoad = useMemo(
+    () => debounce((o: number, q: string, pid: string, mt: string, pr: string) => load(o, q, pid, mt, pr), 300),
+    [load],
   );
 
-  useEffect(() => {
-    api.projects.list(undefined, 200, 0).then((p) => setProjects(p.items)).catch(() => {});
-  }, []);
+  useEffect(() => () => debouncedLoad.cancel(), [debouncedLoad]);
+
+  const projects = useProjectOptions();
 
   useEffect(() => {
     load(offset, query, projectId, memoryType, priority);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offset, projectId, memoryType, priority]);
 
-  useEffect(() => {
-    const onChange = () => load(offset, query, projectId, memoryType, priority);
-    window.addEventListener("contexa:changed", onChange);
-    return () => window.removeEventListener("contexa:changed", onChange);
-  }, [load, offset, query, projectId, memoryType, priority]);
+  const reload = useCallback(() => load(offset, query, projectId, memoryType, priority), [load, offset, query, projectId, memoryType, priority]);
+  useContexaChanged(reload);
 
   const onQuery = (q: string) => {
     setQuery(q);
     setOffset(0);
-    debounced(() => load(0, q, projectId, memoryType, priority));
+    debouncedLoad(0, q, projectId, memoryType, priority);
   };
 
   const remove = (m: Memory) => {
@@ -121,11 +122,7 @@ export function Memories() {
       </div>
 
       {loading ? (
-        <>
-          <div className="skeleton" style={{ height: 46, marginBottom: 6 }} />
-          <div className="skeleton" style={{ height: 46, marginBottom: 6 }} />
-          <div className="skeleton" style={{ height: 46 }} />
-        </>
+        <ListSkeleton />
       ) : items.length === 0 ? (
         <EmptyState
           icon={Brain}

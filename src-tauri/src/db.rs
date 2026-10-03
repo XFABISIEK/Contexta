@@ -184,7 +184,19 @@ const MIGRATION_004: &str = "ALTER TABLE skills ADD COLUMN icon TEXT NOT NULL DE
 
 const MIGRATION_005: &str = "ALTER TABLE projects ADD COLUMN path TEXT NOT NULL DEFAULT '';";
 
-const MIGRATIONS: [(i64, &str); 5] = [(1, MIGRATION_001), (2, MIGRATION_002), (3, MIGRATION_003), (4, MIGRATION_004), (5, MIGRATION_005)];
+const MIGRATION_006: &str = r#"
+CREATE TABLE IF NOT EXISTS entity_history (
+    id TEXT PRIMARY KEY,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_history_entity ON entity_history(entity_id, created_at DESC);
+"#;
+
+const MIGRATIONS: [(i64, &str); 6] = [(1, MIGRATION_001), (2, MIGRATION_002), (3, MIGRATION_003), (4, MIGRATION_004), (5, MIGRATION_005), (6, MIGRATION_006)];
 
 pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
     if let Some(parent) = path.parent() {
@@ -197,7 +209,7 @@ pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
     }
     let conn = Connection::open(path)?;
     conn.execute_batch(
-        "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL;",
+        "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;",
     )?;
     Ok(conn)
 }
@@ -333,7 +345,7 @@ mod tests {
         let v: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, 6);
     }
 
     #[test]
@@ -343,7 +355,7 @@ mod tests {
         let v: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, 6);
     }
 
     #[test]
@@ -432,6 +444,66 @@ mod tests {
         let r = crate::repos::scan_project_files(&conn, &p.id).unwrap();
         // 3 skill docs imported; binary-with-.md-extension + oversized file skipped.
         assert_eq!((r.scanned, r.imported, r.skipped), (5, 3, 2));
+    }
+
+    #[test]
+    fn rescan_updates_changed_files_instead_of_duplicating() {
+        let conn = test_db();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "v1 rules").unwrap();
+        let p = crate::repos::create_project(&conn, crate::models::NewProject {
+            name: "Upd".into(), description: None,
+            path: Some(dir.path().to_string_lossy().to_string()),
+        }).unwrap();
+        let first = crate::repos::scan_project_files(&conn, &p.id).unwrap();
+        assert_eq!((first.scanned, first.imported, first.skipped), (1, 1, 0));
+        let again = crate::repos::scan_project_files(&conn, &p.id).unwrap();
+        assert_eq!((again.imported, again.skipped), (0, 1));
+        std::fs::write(dir.path().join("AGENTS.md"), "v2 changed rules").unwrap();
+        let updated = crate::repos::scan_project_files(&conn, &p.id).unwrap();
+        assert_eq!((updated.imported, updated.skipped), (1, 0));
+        let mems = crate::repos::list_memories(&conn, Some(p.id.clone()), None, None, None, Some(10), Some(0)).unwrap();
+        assert_eq!(mems.total, 1);
+        assert!(mems.items[0].content.contains("v2"));
+    }
+
+    #[test]
+    fn scan_finds_nested_rule_folders_but_skips_junk_dirs() {
+        let conn = test_db();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".cursor/rules/nested")).unwrap();
+        std::fs::write(dir.path().join(".cursor/rules/nested/deep.md"), "deep rules").unwrap();
+        std::fs::create_dir_all(dir.path().join("skills/node_modules")).unwrap();
+        std::fs::write(dir.path().join("skills/node_modules/evil.md"), "junk lib").unwrap();
+        let p = crate::repos::create_project(&conn, crate::models::NewProject {
+            name: "Nest".into(), description: None,
+            path: Some(dir.path().to_string_lossy().to_string()),
+        }).unwrap();
+        let r = crate::repos::scan_project_files(&conn, &p.id).unwrap();
+        assert_eq!((r.scanned, r.imported, r.skipped), (1, 1, 0));
+        assert!(r.files.contains(&".cursor/rules/nested/deep.md".to_string()));
+    }
+
+    #[test]
+    fn file_explorer_lists_tree_and_previews_text() {
+        let conn = test_db();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src/nested")).unwrap();
+        std::fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
+        std::fs::write(dir.path().join("src/nested/deep.md"), "# deep").unwrap();
+        std::fs::create_dir_all(dir.path().join("node_modules")).unwrap();
+        std::fs::write(dir.path().join("node_modules/evil.js"), "junk").unwrap();
+        let p = crate::repos::create_project(&conn, crate::models::NewProject {
+            name: "Files".into(), description: None,
+            path: Some(dir.path().to_string_lossy().to_string()),
+        }).unwrap();
+        let tree = crate::repos::list_project_files(&conn, &p.id).unwrap();
+        assert!(tree.iter().any(|e| e.name == "src" && e.is_dir));
+        assert!(!tree.iter().any(|e| e.name == "node_modules"));
+        let src = tree.iter().find(|e| e.name == "src").unwrap();
+        assert_eq!(src.children.as_ref().unwrap().len(), 2);
+        assert_eq!(crate::repos::read_project_file(&conn, &p.id, "src/main.rs").unwrap(), "fn main() {}");
+        assert!(crate::repos::read_project_file(&conn, &p.id, "../outside.txt").is_err());
     }
 
     #[test]

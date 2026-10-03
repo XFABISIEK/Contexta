@@ -30,8 +30,10 @@ pub struct StorageSetup {
 #[tauri::command]
 pub fn get_storage_setup(app: tauri::AppHandle) -> Result<StorageSetup, String> {
     let default = default_db_path(&app);
+    // Broken config (missing folder, invalid JSON) shows setup again instead of erroring.
+    let configured = storage::configured_path(&default).map(|o| o.is_some()).unwrap_or(false);
     Ok(StorageSetup {
-        configured: storage::configured_path(&default)?.is_some(),
+        configured,
         default_path: default.to_string_lossy().into_owned(),
     })
 }
@@ -278,6 +280,31 @@ pub fn search_everything(
 }
 
 #[tauri::command]
+pub fn suggest_duplicates(
+    state: State<'_, AppState>,
+    title: String,
+    content: Option<String>,
+    exclude_id: Option<String>,
+) -> Result<Vec<SearchResult>, String> {
+    if title.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let query = match content {
+        Some(c) if !c.trim().is_empty() => format!("{} {}", title, c),
+        _ => title,
+    };
+    let params = crate::search::SearchParams {
+        query,
+        entity_types: Some(vec!["memory".to_string()]),
+        project_id: None,
+        limit: 4,
+        offset: 0,
+    };
+    let (results, _) = crate::search::search_hybrid(&lock(&state), &params, &[]).map_err(|e| e.to_string())?;
+    Ok(results.into_iter().filter(|r| Some(r.entity_id.as_str()) != exclude_id.as_deref()).take(3).collect())
+}
+
+#[tauri::command]
 pub fn get_graph(
     state: State<'_, AppState>,
     entity_types: Option<Vec<String>>,
@@ -337,9 +364,14 @@ pub fn import_project(state: State<'_, AppState>, json: String) -> Result<Import
 }
 
 #[tauri::command]
+pub fn import_snapshot(state: State<'_, AppState>, json: String) -> Result<serde_json::Value, String> {
+    crate::repos::import_all(&lock(&state), &json)
+}
+
+#[tauri::command]
 pub fn backup_database(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     let dir = crate::backup_dir(&app)?;
-    let name = format!("contexta-{}.db", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
+    let name = format!("contexta-{}.db", chrono::Utc::now().format("%Y%m%d-%H%M%S-%f"));
     let dest: PathBuf = dir.join(name);
     crate::repos::backup_db(&lock(&state), &dest)?;
     Ok(dest.to_string_lossy().to_string())
@@ -356,4 +388,34 @@ pub fn seed_dev_data(state: State<'_, AppState>) -> Result<String, String> {
 #[tauri::command]
 pub fn scan_project_files(state: State<'_, AppState>, project_id: String) -> Result<crate::models::ScanResult, String> {
     crate::repos::scan_project_files(&lock(&state), &project_id)
+}
+
+#[tauri::command]
+pub fn list_project_files(state: State<'_, AppState>, project_id: String) -> Result<Vec<crate::models::FileEntry>, String> {
+    crate::repos::list_project_files(&lock(&state), &project_id)
+}
+
+#[tauri::command]
+pub fn read_project_file(state: State<'_, AppState>, project_id: String, path: String) -> Result<String, String> {
+    crate::repos::read_project_file(&lock(&state), &project_id, &path)
+}
+
+#[tauri::command]
+pub fn list_history(
+    state: State<'_, AppState>,
+    entity_type: String,
+    entity_id: String,
+    limit: Option<i64>,
+) -> Result<Vec<crate::models::HistoryEntry>, String> {
+    crate::repos::list_history(&lock(&state), &entity_type, &entity_id, limit).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn grep_project_files(
+    state: State<'_, AppState>,
+    project_id: String,
+    pattern: String,
+    limit: Option<i64>,
+) -> Result<Vec<crate::models::GrepHit>, String> {
+    crate::repos::grep_project_files(&lock(&state), &project_id, &pattern, limit.unwrap_or(50))
 }

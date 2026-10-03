@@ -1,9 +1,14 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronRight,
   Folder,
   FolderGit2,
+  FolderTree,
+  FileText,
   FileSearch,
+  Search,
   Copy,
   Plus,
   Pencil,
@@ -18,22 +23,24 @@ import {
 } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
-import { cx, timeAgo, truncate } from "../lib/utils";
-import { EmptyState } from "../components/Modal";
+import { cx, debounce, formatBytes, timeAgo, truncate } from "../lib/utils";
+import { EmptyState, ListSkeleton, Modal } from "../components/Modal";
+import { useContexaChanged } from "../lib/hooks";
 import { Select } from "../components/Select";
-import type { Connection, Memory, Project, Rule, Skill } from "../types";
+import type { Connection, FileEntry, GrepHit, Memory, Project, Rule, Skill } from "../types";
 import { SkillIcon } from "../components/SkillIcon";
 
 const GraphViewLazy = lazy(() =>
   import("./GraphView").then((m) => ({ default: m.GraphView })),
 );
 
-type Tab = "overview" | "memories" | "rules" | "graph";
+type Tab = "overview" | "memories" | "rules" | "files" | "graph";
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof Folder }> = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "memories", label: "Memories", icon: Brain },
   { id: "rules", label: "Rules", icon: ScrollText },
+  { id: "files", label: "Files", icon: FolderTree },
   { id: "graph", label: "Graph", icon: Network },
 ];
 
@@ -46,25 +53,38 @@ export function Projects() {
   const refreshStats = useApp((s) => s.refreshStats);
   const [projects, setProjects] = useState<Project[]>([]);
   const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const seq = useRef(0);
+  const queryRef = useRef("");
+  queryRef.current = query;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (q?: string) => {
+    const id = ++seq.current;
+    setLoading(true);
     try {
-      const p = await api.projects.list(query.trim() || undefined, 100, 0);
+      const needle = (q ?? queryRef.current).trim() || undefined;
+      const p = await api.projects.list(needle, 100, 0);
+      if (seq.current !== id) return;
       setProjects(p.items);
     } catch (e) {
+      if (seq.current !== id) return;
       toast("error", e instanceof Error ? e.message : "Failed to load projects");
+    } finally {
+      if (seq.current === id) setLoading(false);
     }
-  }, [query, toast]);
+  }, [toast]);
+
+  const debouncedLoad = useMemo(() => debounce((q: string) => load(q), 250), [load]);
+
+  useEffect(() => () => debouncedLoad.cancel(), [debouncedLoad]);
 
   useEffect(() => {
-    if (!selectedId) load();
-  }, [selectedId, load]);
+    if (!selectedId) load(queryRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
 
-  useEffect(() => {
-    const onChange = () => load();
-    window.addEventListener("contexa:changed", onChange);
-    return () => window.removeEventListener("contexa:changed", onChange);
-  }, [load]);
+  const reloadList = useCallback(() => load(queryRef.current), [load]);
+  useContexaChanged(reloadList);
 
   if (selectedId) {
     return <ProjectDetail id={selectedId} onBack={() => go("projects", null)} />;
@@ -79,13 +99,15 @@ export function Projects() {
       <div className="toolbar">
         <div className="search-input">
           <Folder />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter projects..." aria-label="Filter projects" />
+          <input value={query} onChange={(e) => { setQuery(e.target.value); debouncedLoad(e.target.value); }} placeholder="Filter projects..." aria-label="Filter projects" />
         </div>
         <button className="btn primary" onClick={() => setComposer({ kind: "project" })}>
           <Plus /> New Project
         </button>
       </div>
-      {projects.length === 0 ? (
+      {loading ? (
+        <ListSkeleton />
+      ) : projects.length === 0 ? (
         <EmptyState
           icon={Folder}
           title="No projects found."
@@ -158,6 +180,24 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState("");
+  const [copyingCtx, setCopyingCtx] = useState(false);
+  const [ctxMsg, setCtxMsg] = useState("");
+
+  const copyContext = async () => {
+    if (!project) return;
+    setCopyingCtx(true);
+    setCtxMsg("");
+    try {
+      const ctx = await api.context(project.name, "", 10, 4000);
+      await navigator.clipboard.writeText(ctx.markdown);
+      setCtxMsg(`${ctx.rules.length} rules · ${ctx.memories.length} memories · ${ctx.skills.length} skills copied`);
+      toast("success", "Project context copied");
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Copy failed");
+    } finally {
+      setCopyingCtx(false);
+    }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -185,10 +225,8 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }) {
 
   useEffect(() => {
     load();
-    const onChange = () => load();
-    window.addEventListener("contexa:changed", onChange);
-    return () => window.removeEventListener("contexa:changed", onChange);
   }, [load]);
+  useContexaChanged(load);
 
   const linkSkill = async () => {
     if (!linkId) return;
@@ -308,7 +346,8 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }) {
             <div className="section-head"><span className="section-title">AI context files</span></div>
             <div className="card">
               <p className="mono-dim" style={{ marginTop: 0 }}>
-                Reads AGENTS.md, CLAUDE.md, Cursor rules and similar files from the project folder into memories.
+                Reads AGENTS.md, CLAUDE.md, MUSE.md, GEMINI.md, CODEX.md, .muserules, .cursorrules,
+                .cursor/rules and skills/ from the project folder into reference memories.
               </p>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <button className="btn sm" onClick={scanFiles} disabled={scanning || !project.path}>
@@ -318,6 +357,21 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }) {
                   <span className="mono-dim">Set the project folder first (edit project → Local folder).</span>
                 )}
                 {scanMsg && <span className="mono-dim">{scanMsg}</span>}
+              </div>
+            </div>
+          </div>
+
+          <div className="section">
+            <div className="section-head"><span className="section-title">Share context</span></div>
+            <div className="card">
+              <p className="mono-dim" style={{ marginTop: 0 }}>
+                Copy this project's AI context (critical rules, ranked memories, skills) as Markdown.
+              </p>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button className="btn sm" disabled={copyingCtx} onClick={copyContext}>
+                  <Copy size={14} /> {copyingCtx ? "Building…" : "Copy context Markdown"}
+                </button>
+                {ctxMsg && <span className="mono-dim">{ctxMsg}</span>}
               </div>
             </div>
           </div>
@@ -455,6 +509,14 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }) {
         </>
       )}
 
+      {tab === "files" && (
+        project.path ? (
+          <FileExplorer key={id} projectId={id} />
+        ) : (
+          <div className="mono-dim">Set the project folder first (edit project - Local folder).</div>
+        )
+      )}
+
       {tab === "graph" && (
         <div style={{ height: 480, border: "1px solid var(--border-soft)", borderRadius: 6, overflow: "hidden" }}>
           <Suspense fallback={<div className="mono-dim" style={{ padding: 16 }}>Loading graph…</div>}>
@@ -463,5 +525,152 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }) {
         </div>
       )}
     </div>
+  );
+}
+
+
+function FileExplorer({ projectId }: { projectId: string }) {
+  const toast = useApp((s) => s.toast);
+  const [tree, setTree] = useState<FileEntry[] | null>(null);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [preview, setPreview] = useState<{ path: string; text: string } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState("");
+  const [needle, setNeedle] = useState("");
+  const [hits, setHits] = useState<GrepHit[] | null>(null);
+  const [grepBusy, setGrepBusy] = useState(false);
+
+  const runGrep = useCallback(async (q: string) => {
+    if (!q.trim()) {
+      setHits(null);
+      return;
+    }
+    setGrepBusy(true);
+    try {
+      setHits(await api.files.grep(projectId, q.trim(), 50));
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Search failed");
+      setHits([]);
+    } finally {
+      setGrepBusy(false);
+    }
+  }, [projectId, toast]);
+  const debouncedGrep = useMemo(() => debounce((q: string) => runGrep(q), 300), [runGrep]);
+  useEffect(() => () => debouncedGrep.cancel(), [debouncedGrep]);
+
+  useEffect(() => {
+    setTree(null);
+    api.files
+      .list(projectId)
+      .then(setTree)
+      .catch((e) => {
+        setTree([]);
+        toast("error", e instanceof Error ? e.message : "Could not list files");
+      });
+  }, [projectId, toast]);
+
+  const toggle = (path: string) => setOpen((o) => ({ ...o, [path]: !o[path] }));
+
+  const openPreview = async (path: string) => {
+    setPreviewLoading(path);
+    try {
+      const text = await api.files.read(projectId, path);
+      setPreview({ path, text });
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Could not preview file");
+    } finally {
+      setPreviewLoading("");
+    }
+  };
+
+  const copyPreview = async () => {
+    try {
+      await navigator.clipboard.writeText(preview?.text ?? "");
+      toast("success", "File content copied");
+    } catch {
+      toast("error", "Clipboard unavailable");
+    }
+  };
+
+  const renderEntries = (entries: FileEntry[], depth: number) => (
+    <>
+      {entries.map((e) => (
+        <div key={e.path}>
+          <div
+            className="file-row"
+            style={{ paddingLeft: 10 + depth * 16 }}
+            onClick={() => (e.is_dir ? toggle(e.path) : openPreview(e.path))}
+            title={e.is_dir ? (open[e.path] ? "Collapse" : "Expand") : `${formatBytes(e.size)} - preview`}
+          >
+            {e.is_dir ? (
+              open[e.path] ? <ChevronDown size={13} /> : <ChevronRight size={13} />
+            ) : (
+              <FileText size={13} />
+            )}
+            <span className="file-name">{e.name}</span>
+            {!e.is_dir && <span className="file-meta">{formatBytes(e.size)}</span>}
+            {previewLoading === e.path && <span className="mono-dim">...</span>}
+          </div>
+          {e.is_dir && open[e.path] && e.children && renderEntries(e.children, depth + 1)}
+        </div>
+      ))}
+    </>
+  );
+
+  if (tree === null) {
+    return (
+      <>
+        <ListSkeleton height={30} />
+      </>
+    );
+  }
+  if (tree.length === 0) {
+    return <div className="mono-dim">Folder is empty or unavailable.</div>;
+  }
+  return (
+    <>
+      <div className="search-input" style={{ marginBottom: 8 }}>
+        <Search size={14} />
+        <input
+          value={needle}
+          onChange={(e) => { setNeedle(e.target.value); debouncedGrep(e.target.value); }}
+          placeholder="Search in project files…"
+          aria-label="Search in project files"
+        />
+      </div>
+      {hits !== null && (
+        <div className="list" style={{ marginBottom: 8 }}>
+          {grepBusy ? (
+            <ListSkeleton rows={2} height={34} />
+          ) : hits.length === 0 ? (
+            <div className="mono-dim" style={{ padding: 8 }}>No matches.</div>
+          ) : (
+            hits.map((h, i) => (
+              <div key={`${h.file}:${h.line}:${i}`} className="row" onClick={() => openPreview(h.file)}>
+                <div className="row-main">
+                  <div className="row-title">{h.file}<span className="mono-dim">:{h.line}</span></div>
+                  <div className="row-sub">{h.text || "—"}</div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+      <div className="file-tree" role="tree" aria-label="Project files">
+        {renderEntries(tree, 0)}
+      </div>
+      <Modal
+        open={preview !== null}
+        title={preview?.path ?? ""}
+        wide
+        onClose={() => setPreview(null)}
+        footer={
+          <button className="btn sm" onClick={copyPreview}>
+            <Copy size={14} /> Copy
+          </button>
+        }
+      >
+        <pre className="file-preview">{preview?.text}</pre>
+      </Modal>
+    </>
   );
 }

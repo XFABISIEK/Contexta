@@ -9,15 +9,17 @@ import {
   Wrench,
   User,
   Info,
+  Plug,
   Settings,
   ChevronDown,
   CircleUserRound,
+  Database,
 } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { cx } from "../lib/utils";
 import type { View } from "../types";
 
-const PROJECT_VIEWS: View[] = ["projects", "memories", "rules", "skills", "personal"];
+const PROJECT_VIEWS: View[] = ["projects", "memories", "rules", "skills", "personal", "database"];
 
 const PROJECT_SUBS: Array<{ view: View; label: string; icon: typeof Folder; all?: boolean }> = [
   { view: "projects", label: "All projects", icon: Folder, all: true },
@@ -25,6 +27,7 @@ const PROJECT_SUBS: Array<{ view: View; label: string; icon: typeof Folder; all?
   { view: "rules", label: "Rules", icon: ScrollText },
   { view: "skills", label: "Skills", icon: Wrench },
   { view: "personal", label: "Personal", icon: User },
+  { view: "database", label: "Database", icon: Database },
 ];
 
 export function Sidebar() {
@@ -91,6 +94,15 @@ export function Sidebar() {
       >
         <Network />
         <span className="side-text">Graph</span>
+      </button>
+      <button
+        className={cx("side-item", view === "mcp" && "active")}
+        onClick={() => go("mcp")}
+        title="Contexa-MCP"
+        aria-label="Contexa-MCP"
+      >
+        <Plug />
+        <span className="side-text">MCP</span>
       </button>
       <button
         className={cx("side-item", view === "profile" && "active")}

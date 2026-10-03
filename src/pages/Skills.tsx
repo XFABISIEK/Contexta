@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Wrench, Plus, Trash2, Search, Folder, FolderOpen, ChevronDown } from "lucide-react";
+import { Wrench, Plus, Trash2, Search, Folder, FolderOpen, ChevronDown, LayoutTemplate, Link2 } from "lucide-react";
 import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import { cx, debounce, timeAgo, truncate } from "../lib/utils";
-import { EmptyState } from "../components/Modal";
+import { EmptyState, ListSkeleton } from "../components/Modal";
+import { SKILL_TEMPLATES, type SkillTemplate } from "../lib/templates";
+import { useContexaChanged } from "../lib/hooks";
 import { SkillIcon } from "../components/SkillIcon";
 import type { Skill } from "../types";
 
@@ -15,30 +17,83 @@ export function Skills() {
   const refreshStats = useApp((s) => s.refreshStats);
   const [items, setItems] = useState<Skill[]>([]);
   const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [importUrl, setImportUrl] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState("");
+
+  const addTemplate = async (t: SkillTemplate) => {
+    try {
+      await api.skills.create({ name: t.name, description: t.description, content: t.content, category: t.category });
+      toast("success", `Skill "${t.name}" added`);
+      refreshStats();
+      load(query);
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Add failed");
+    }
+  };
+
+  const importFromUrl = async () => {
+    const url = importUrl.trim();
+    if (!/^https?:\/\//i.test(url)) {
+      setImportMsg("Paste an https:// URL to a raw markdown file.");
+      return;
+    }
+    setImporting(true);
+    setImportMsg("");
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      if (text.length > 200_000) throw new Error("File too large (200 KB cap).");
+      if (!text.trim()) throw new Error("File is empty.");
+      const name = decodeURIComponent(url.split("?")[0].split("/").pop() || "imported-skill")
+        .replace(/\.md$/i, "").replace(/[-_]+/g, " ").trim() || "imported-skill";
+      await api.skills.create({ name, description: `Imported from ${url}`, content: text });
+      toast("success", `Skill "${name}" imported`);
+      refreshStats();
+      setImportUrl("");
+      load(query);
+    } catch (e) {
+      setImportMsg(e instanceof Error ? e.message : "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  };
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const seq = useRef(0);
 
   const load = useCallback(async (q: string) => {
+    const id = ++seq.current;
+    setLoading(true);
     try {
       const page = await api.skills.list(q.trim() || null, null, 200, 0);
+      if (seq.current !== id) return;
       setItems(page.items);
     } catch (e) {
+      if (seq.current !== id) return;
       toast("error", e instanceof Error ? e.message : "Failed to load skills");
+    } finally {
+      if (seq.current === id) setLoading(false);
     }
   }, [toast]);
+
+  const debouncedLoad = useMemo(() => debounce((q: string) => load(q), 300), [load]);
 
   useEffect(() => {
     load("");
   }, [load]);
 
-  useEffect(() => {
-    const onChange = () => load(query);
-    window.addEventListener("contexa:changed", onChange);
-    return () => window.removeEventListener("contexa:changed", onChange);
-  }, [load, query]);
+  useEffect(() => () => debouncedLoad.cancel(), [debouncedLoad]);
+
+  const reload = useCallback(() => load(query), [load, query]);
+  useContexaChanged(reload);
 
   const onQuery = (q: string) => {
     setQuery(q);
-    debounce(() => load(q), 300)();
+    debouncedLoad(q);
   };
 
   const groups = useMemo(() => {
@@ -85,11 +140,55 @@ export function Skills() {
           <Search />
           <input value={query} onChange={(e) => onQuery(e.target.value)} placeholder="Search skills..." aria-label="Search skills" />
         </div>
+        <button className="btn" onClick={() => setShowTemplates((v) => !v)}>
+          <LayoutTemplate size={14} /> Templates
+        </button>
+        <button className="btn" onClick={() => setShowImport((v) => !v)}>
+          <Link2 size={14} /> From URL
+        </button>
         <button className="btn primary" onClick={() => setComposer({ kind: "skill" })}>
           <Plus /> New Skill
         </button>
       </div>
-      {items.length === 0 ? (
+      {showTemplates && (
+        <div className="list" style={{ marginBottom: 12 }}>
+          {SKILL_TEMPLATES.map((t) => (
+            <div key={t.name} className="row" style={{ cursor: "default" }}>
+              <div className="row-main">
+                <div className="row-title">{t.name}</div>
+                <div className="row-sub">{t.description}</div>
+              </div>
+              <div className="row-meta">
+                <button className="btn sm" style={{ opacity: 1 }} onClick={() => addTemplate(t)}>
+                  <Plus size={13} /> Add
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {showImport && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <div className="search-input" style={{ flex: 1 }}>
+              <Link2 size={14} />
+              <input
+                value={importUrl}
+                onChange={(e) => setImportUrl(e.target.value)}
+                placeholder="https://raw.githubusercontent.com/…/SKILL.md"
+                aria-label="Skill file URL"
+              />
+            </div>
+            <button className="btn primary sm" disabled={importing} onClick={importFromUrl}>
+              {importing ? "Importing…" : "Import"}
+            </button>
+          </div>
+          {importMsg && <div className="mono-dim" style={{ marginTop: 8 }}>{importMsg}</div>}
+        </div>
+      )}
+      {loading ? (
+        <ListSkeleton />
+      ) : items.length === 0 ? (
         <EmptyState
           icon={Wrench}
           title="No skills found."

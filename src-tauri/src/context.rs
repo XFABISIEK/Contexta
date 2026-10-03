@@ -1,4 +1,5 @@
 use rusqlite::{params, Connection};
+use std::collections::HashMap;
 
 use crate::models::{
     Memory, PersonalInfo, Project, ProjectContext, Rule, Skill, Tag,
@@ -12,21 +13,43 @@ pub struct ContextOptions {
     pub max_tokens: i64,
 }
 
-fn tags_for(conn: &Connection, memory_id: &str) -> rusqlite::Result<Vec<Tag>> {
-    let mut stmt = conn.prepare(
-        "SELECT t.id, t.name FROM tags t JOIN memory_tags mt ON mt.tag_id = t.id WHERE mt.memory_id = ?1 ORDER BY t.name",
-    )?;
-    let rows = stmt.query_map(params![memory_id], |r| {
-        Ok(Tag { id: r.get(0)?, name: r.get(1)? })
+fn tags_for_many(conn: &Connection, memory_ids: &[String]) -> rusqlite::Result<HashMap<String, Vec<Tag>>> {
+    let mut map: HashMap<String, Vec<Tag>> = HashMap::new();
+    if memory_ids.is_empty() {
+        return Ok(map);
+    }
+    let ph = memory_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT mt.memory_id, t.id, t.name FROM tags t JOIN memory_tags mt ON mt.tag_id = t.id WHERE mt.memory_id IN ({}) ORDER BY t.name",
+        ph
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let refs: Vec<&dyn rusqlite::ToSql> = memory_ids.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
+    let rows = stmt.query_map(refs.as_slice(), |r| {
+        Ok((r.get::<_, String>(0)?, Tag { id: r.get(1)?, name: r.get(2)? }))
     })?;
-    rows.collect()
+    for r in rows {
+        let (mid, tag) = r?;
+        map.entry(mid).or_default().push(tag);
+    }
+    Ok(map)
 }
 
-fn read_memory(conn: &Connection, id: &str) -> rusqlite::Result<Option<Memory>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, project_id, title, content, memory_type, priority, source, created_at, updated_at FROM memories WHERE id = ?1",
-    )?;
-    let mut rows = stmt.query_map(params![id], |r| {
+// Batched memory load: one IN query plus one tags query, no N+1.
+// Keeps the input order (FTS rank or priority), skips missing ids.
+fn read_memories_batch(conn: &Connection, ids: &[String]) -> rusqlite::Result<Vec<Memory>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ph = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT id, project_id, title, content, memory_type, priority, source, created_at, updated_at FROM memories WHERE id IN ({})",
+        ph
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let refs: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
+    let mut by_id: HashMap<String, Memory> = HashMap::new();
+    let rows = stmt.query_map(refs.as_slice(), |r| {
         Ok(Memory {
             id: r.get(0)?,
             project_id: r.get(1)?,
@@ -40,14 +63,19 @@ fn read_memory(conn: &Connection, id: &str) -> rusqlite::Result<Option<Memory>> 
             updated_at: r.get(8)?,
         })
     })?;
-    match rows.next() {
-        None => Ok(None),
-        Some(r) => {
-            let mut m = r?;
-            m.tags = tags_for(conn, &m.id)?;
-            Ok(Some(m))
+    for r in rows {
+        let m = r?;
+        by_id.insert(m.id.clone(), m);
+    }
+    let tags = tags_for_many(conn, ids)?;
+    let mut out = Vec::with_capacity(ids.len());
+    for id in ids {
+        if let Some(mut m) = by_id.remove(id) {
+            m.tags = tags.get(id).cloned().unwrap_or_default();
+            out.push(m);
         }
     }
+    Ok(out)
 }
 
 fn top_memories_by_priority(conn: &Connection, project_id: &str, limit: i64) -> rusqlite::Result<Vec<Memory>> {
@@ -59,13 +87,7 @@ fn top_memories_by_priority(conn: &Connection, project_id: &str, limit: i64) -> 
     let ids: Vec<String> = stmt
         .query_map(params![project_id, limit], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
-    let mut out = Vec::new();
-    for id in ids {
-        if let Some(m) = read_memory(conn, &id)? {
-            out.push(m);
-        }
-    }
-    Ok(out)
+    read_memories_batch(conn, &ids)
 }
 
 fn project_rules(conn: &Connection, project_id: &Option<String>) -> rusqlite::Result<Vec<Rule>> {
@@ -90,52 +112,29 @@ fn project_rules(conn: &Connection, project_id: &Option<String>) -> rusqlite::Re
 }
 
 fn matching_skills(conn: &Connection, query: &str, limit: i64) -> rusqlite::Result<Vec<Skill>> {
-    if query.trim().is_empty() {
-        let mut stmt = conn.prepare(
-            "SELECT id, name, description, content, category, created_at, updated_at FROM skills ORDER BY updated_at DESC LIMIT ?1",
-        )?;
-        return stmt
-            .query_map(params![limit.min(5)], |r| {
-                Ok(Skill {
-                    id: r.get(0)?,
-                    name: r.get(1)?,
-                    description: r.get(2)?,
-                    content: r.get(3)?,
-                    category: r.get(4)?,
-                    created_at: r.get(5)?,
-                    updated_at: r.get(6)?,
-                    icon: String::new(),
-                })
-            })?
-            .collect();
-    }
-    let words: Vec<String> = query
-        .split_whitespace()
-        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
-        .filter(|w| w.len() > 2)
-        .take(6)
-        .collect();
-    if words.is_empty() {
+    // FTS-ranked through the shared hybrid search (no LIKE full scan, no string-bound LIMIT);
+    // an empty query falls back to recency inside search_hybrid.
+    let p = SearchParams {
+        query: query.to_string(),
+        entity_types: Some(vec!["skill".to_string()]),
+        project_id: None,
+        limit: limit.clamp(1, 20),
+        offset: 0,
+    };
+    let (hits, _) = crate::search::search_hybrid(conn, &p, &[])?;
+    let ids: Vec<String> = hits.into_iter().map(|h| h.entity_id).collect();
+    if ids.is_empty() {
         return Ok(Vec::new());
     }
-    let conds = words
-        .iter()
-        .map(|_| "(LOWER(name) LIKE '%' || ? || '%' OR LOWER(description) LIKE '%' || ? || '%' OR LOWER(content) LIKE '%' || ? || '%')")
-        .collect::<Vec<_>>()
-        .join(" OR ");
+    // One batched load keeping FTS rank order, icons included.
+    let ph = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
     let sql = format!(
-        "SELECT id, name, description, content, category, created_at, updated_at FROM skills WHERE {} LIMIT ?",
-        conds
+        "SELECT id, name, description, content, category, created_at, updated_at, icon FROM skills WHERE id IN ({})",
+        ph
     );
     let mut stmt = conn.prepare(&sql)?;
-    let mut values: Vec<String> = Vec::new();
-    for w in &words {
-        values.push(w.clone());
-        values.push(w.clone());
-        values.push(w.clone());
-    }
-    values.push(limit.to_string());
-    let refs: Vec<&dyn rusqlite::ToSql> = values.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
+    let refs: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
+    let mut by_id: HashMap<String, Skill> = HashMap::new();
     let rows = stmt.query_map(refs.as_slice(), |r| {
         Ok(Skill {
             id: r.get(0)?,
@@ -145,10 +144,20 @@ fn matching_skills(conn: &Connection, query: &str, limit: i64) -> rusqlite::Resu
             category: r.get(4)?,
             created_at: r.get(5)?,
             updated_at: r.get(6)?,
-            icon: String::new(),
+            icon: r.get(7)?,
         })
     })?;
-    rows.collect::<rusqlite::Result<Vec<Skill>>>()
+    for r in rows {
+        let s = r?;
+        by_id.insert(s.id.clone(), s);
+    }
+    let mut out = Vec::with_capacity(ids.len());
+    for id in &ids {
+        if let Some(s) = by_id.remove(id) {
+            out.push(s);
+        }
+    }
+    Ok(out)
 }
 
 fn matching_personal(conn: &Connection, query: &str) -> rusqlite::Result<Vec<PersonalInfo>> {
@@ -164,23 +173,37 @@ fn matching_personal(conn: &Connection, query: &str) -> rusqlite::Result<Vec<Per
         offset: 0,
     };
     let (hits, _) = crate::search::search_hybrid(conn, &p, &[])?;
-    let mut out = Vec::new();
-    for h in hits {
-        let mut stmt = conn.prepare(
-            "SELECT id, key, title, content, created_at, updated_at FROM personal_information WHERE id = ?1",
-        )?;
-        let mut rows = stmt.query_map(params![h.entity_id], |r| {
-            Ok(PersonalInfo {
-                id: r.get(0)?,
-                key: r.get(1)?,
-                title: r.get(2)?,
-                content: r.get(3)?,
-                created_at: r.get(4)?,
-                updated_at: r.get(5)?,
-            })
-        })?;
-        if let Some(r) = rows.next() {
-            out.push(r?);
+    let ids: Vec<String> = hits.into_iter().map(|h| h.entity_id).collect();
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    // One batched load keeping hit order instead of one query per hit.
+    let ph = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT id, key, title, content, created_at, updated_at FROM personal_information WHERE id IN ({})",
+        ph
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let refs: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
+    let mut by_id: HashMap<String, PersonalInfo> = HashMap::new();
+    let rows = stmt.query_map(refs.as_slice(), |r| {
+        Ok(PersonalInfo {
+            id: r.get(0)?,
+            key: r.get(1)?,
+            title: r.get(2)?,
+            content: r.get(3)?,
+            created_at: r.get(4)?,
+            updated_at: r.get(5)?,
+        })
+    })?;
+    for r in rows {
+        let p = r?;
+        by_id.insert(p.id.clone(), p);
+    }
+    let mut out = Vec::with_capacity(ids.len());
+    for id in &ids {
+        if let Some(p) = by_id.remove(id) {
+            out.push(p);
         }
     }
     Ok(out)
@@ -203,21 +226,18 @@ fn expand_neighbors(conn: &Connection, memory_ids: &[String], cap: i64) -> rusql
     for _ in 0..4 {
         refs.extend(memory_ids.iter().map(|v| v as &dyn rusqlite::ToSql));
     }
-    let cap_s = cap.to_string();
-    refs.push(&cap_s);
+    refs.push(&cap);
     let rows = stmt.query_map(refs.as_slice(), |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-    let mut out = Vec::new();
     let already: std::collections::HashSet<&String> = memory_ids.iter().collect();
+    let mut nids: Vec<String> = Vec::new();
     for r in rows {
         let (nid, nt) = r?;
-        if nt != "memory" || already.contains(&nid) || out.len() as i64 >= cap {
+        if nt != "memory" || already.contains(&nid) || nids.contains(&nid) || nids.len() as i64 >= cap {
             continue;
         }
-        if let Some(m) = read_memory(conn, &nid)? {
-            out.push(m);
-        }
+        nids.push(nid);
     }
-    Ok(out)
+    read_memories_batch(conn, &nids)
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -347,14 +367,8 @@ pub fn build_project_context(conn: &Connection, opts: &ContextOptions) -> rusqli
         }
     } else {
         let (ids, _) = fts_memory_ids(conn, &opts.query, &pid, max_results)?;
-        let mut out = Vec::new();
-        for id in ids {
-            if let Some(m) = read_memory(conn, &id)? {
-                // Low priority memories only join on strong textual match (already FTS-filtered).
-                out.push(m);
-            }
-        }
-        out
+        // FTS already filtered; keep its rank order with one batched load.
+        read_memories_batch(conn, &ids)?
     };
     // 3. Expand one hop over explicit connections.
     let ids: Vec<String> = memories.iter().map(|m| m.id.clone()).collect();
@@ -441,5 +455,27 @@ mod tests {
         assert!(md.contains("- **[normal] a**"));
         assert!(!md.contains("- **[normal] c**"));
         assert!(md.contains("omitted for token budget"));
+    }
+
+    #[test]
+    fn skills_come_from_fts_rank_with_empty_query_fallback() {
+        let conn = seeded();
+        let mk = |name: &str, desc: &str| {
+            crate::repos::create_skill(&conn, crate::models::NewSkill {
+                name: name.to_string(),
+                description: Some(desc.to_string()),
+                content: None,
+                category: None,
+                icon: None,
+            })
+            .unwrap()
+        };
+        mk("React Patterns", "Reusable React component patterns");
+        mk("Rust Lifetimes", "Understanding borrow checker lifetimes");
+        let got = matching_skills(&conn, "react patterns", 10).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].name, "React Patterns");
+        let recent = matching_skills(&conn, "", 10).unwrap();
+        assert_eq!(recent.len(), 2);
     }
 }
