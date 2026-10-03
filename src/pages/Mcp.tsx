@@ -4,11 +4,12 @@ import { useApp } from "../stores/app-store";
 import { api } from "../lib/tauri";
 import { MCP_BINARY, MCP_PRESETS, MCP_SERVER_NAME, MCP_TOOLS } from "../lib/mcp";
 import appIcon from "../../src-tauri/icons/128x128.png";
-import type { DbInfo } from "../types";
+import type { DbInfo, McpInfo } from "../types";
 
 export function Mcp() {
   const toast = useApp((s) => s.toast);
   const [dbInfo, setDbInfo] = useState<DbInfo | null>(null);
+  const [mcpInfo, setMcpInfo] = useState<McpInfo | null>(null);
   const reads = MCP_TOOLS.filter((t) => t.kind === "read");
   const writes = MCP_TOOLS.filter((t) => t.kind === "write");
   const [exe, setExe] = useState("");
@@ -19,6 +20,10 @@ export function Mcp() {
 
   useEffect(() => {
     api.dbInfo().then(setDbInfo).catch(() => {});
+    api.mcp.info().then((i) => {
+      setMcpInfo(i);
+      setExe((prev) => prev || i.exe_path);
+    }).catch(() => {});
     api.settings.all().then((s) => {
       if (s.mcp_write === "readonly") setWriteMode("readonly");
     }).catch(() => {});
@@ -92,14 +97,28 @@ export function Mcp() {
       </div>
 
       <div className="section">
-        <div className="section-head"><span className="section-title">Connect a client</span></div>
+        <div className="section-head"><span className="section-title">Connect a client — 3 steps</span></div>
         <div className="card">
-          <p className="mono-dim" style={{ marginTop: 0 }}>
-            <Plug size={12} style={{ display: "inline", verticalAlign: -1 }} /> Build once, then point any MCP client
-            (Claude Desktop, Cursor, …) at the exe, optionally with <span className="code">CONTEXA_DB</span> pointing
-            at the database above.
+          <div className="kv">
+            <span className="k">Binary</span>
+            {mcpInfo ? (
+              mcpInfo.exe_exists ? (
+                <span style={{ color: "var(--ok, #4caf7d)" }}>✓ found (v{mcpInfo.version})</span>
+              ) : (
+                <span style={{ color: "var(--warn, #d99a3d)" }}>⚠ not built yet — run step 1</span>
+              )
+            ) : (
+              <span className="mono-dim">…</span>
+            )}
+          </div>
+          <p className="mono-dim" style={{ marginBottom: 6 }}>
+            <strong>1.</strong> Have the exe — it ships next to the app, or build it from source:
           </p>
           <div className="md-preview" style={{ marginBottom: 10 }}>cargo build --release --bin {MCP_BINARY}</div>
+          <p className="mono-dim" style={{ marginBottom: 6 }}>
+            <strong>2.</strong> Pick your client, check the path, copy the config —{" "}
+            <span className="code">CONTEXA_DB</span> already points at the database above.
+          </p>
           <div className="search-input" style={{ marginBottom: 8 }}>
             <Plug size={14} />
             <input
@@ -123,12 +142,16 @@ export function Mcp() {
             ))}
           </div>
           <div className="mono-dim" style={{ marginBottom: 8 }}>
-            Paste into <span className="code">{preset.file}</span> - CONTEXA_DB already points at the database above.
+            Paste into <span className="code">{preset.file}</span>, then{" "}
+            <strong>3.</strong> restart the client — the tools appear on next launch.
           </div>
           <div className="md-preview" style={{ marginBottom: 10 }}>{snippet}</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button className="btn sm primary" onClick={() => copy(snippet, `${preset.label} config`)}>
               <Copy size={14} /> Copy {preset.label} config
+            </button>
+            <button className="btn sm" onClick={() => copy(exe.trim(), "EXE path")}>
+              <Copy size={14} /> Copy EXE path
             </button>
             <button className="btn sm" onClick={copySpec}>
               <Copy size={14} /> Copy tool spec (JSON)

@@ -140,6 +140,13 @@ export interface DbInfo {
   size_bytes: number;
 }
 
+export interface McpInfo {
+  exe_path: string;
+  exe_exists: boolean;
+  db_path: string;
+  version: string;
+}
+
 export interface StorageSetupInfo {
   configured: boolean;
   default_path: string;

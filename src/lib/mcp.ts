@@ -89,4 +89,21 @@ export const MCP_PRESETS: McpPreset[] = [
     file: ".vscode/mcp.json in the project, or user settings.json under mcp.servers",
     json: (exe, db) => JSON.stringify({ mcp: { servers: { [MCP_SERVER_NAME]: serverEntry(exe, db) } } }, null, 2),
   },
+  {
+    id: "opencode",
+    label: "opencode",
+    file: "opencode.json (project root) or ~/.config/opencode/opencode.json",
+    json: (exe, db) =>
+      JSON.stringify({
+        $schema: "https://opencode.ai/config.json",
+        mcp: {
+          [MCP_SERVER_NAME]: {
+            type: "local",
+            command: [exe || `<path-to>\\${MCP_BINARY}.exe`],
+            environment: { CONTEXA_DB: db },
+            enabled: true,
+          },
+        },
+      }, null, 2),
+  },
 ];

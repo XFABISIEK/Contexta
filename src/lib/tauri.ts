@@ -9,6 +9,7 @@ import type {
   GrepHit,
   HistoryEntry,
   ImportResult,
+  McpInfo,
   Memory,
   Paged,
   PersonalInfo,
@@ -41,6 +42,10 @@ export const api = {
   stats: () => call<DashboardStats>("get_dashboard_stats"),
   activity: (days = 365) => call<ActivityDay[]>("activity_stats", { days }),
   dbInfo: () => call<DbInfo>("get_db_info"),
+
+  mcp: {
+    info: () => call<McpInfo>("get_mcp_info"),
+  },
 
   projects: {
     list: (query?: string, limit = 50, offset = 0) =>

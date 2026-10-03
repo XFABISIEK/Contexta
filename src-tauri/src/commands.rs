@@ -63,6 +63,37 @@ pub fn get_db_info(app: tauri::AppHandle) -> Result<DbInfo, String> {
     Ok(DbInfo { path: path.to_string_lossy().to_string(), size_bytes: size })
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct McpInfo {
+    pub exe_path: String,
+    pub exe_exists: bool,
+    pub db_path: String,
+    pub version: String,
+}
+
+#[tauri::command]
+pub fn get_mcp_info(app: tauri::AppHandle) -> Result<McpInfo, String> {
+    // The MCP server ships next to the app binary (release) or in the same
+    // cargo target dir (dev: target/debug/contexa-mcp next to contexta).
+    #[cfg(windows)]
+    let file = "contexa-mcp.exe";
+    #[cfg(not(windows))]
+    let file = "contexa-mcp";
+    let exe_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join(file)))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| file.to_string());
+    let exe_exists = std::path::Path::new(&exe_path).is_file();
+    let db = db_path(&app)?;
+    Ok(McpInfo {
+        exe_path,
+        exe_exists,
+        db_path: db.to_string_lossy().into_owned(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    })
+}
+
 // ---------- projects ----------
 
 #[tauri::command]

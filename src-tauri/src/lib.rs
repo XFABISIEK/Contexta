@@ -105,6 +105,7 @@ pub fn run() {
             commands::get_dashboard_stats,
             commands::activity_stats,
             commands::get_db_info,
+            commands::get_mcp_info,
             commands::get_storage_setup,
             commands::complete_storage_setup,
             commands::list_projects,

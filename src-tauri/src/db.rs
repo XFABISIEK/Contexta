@@ -400,7 +400,7 @@ mod tests {
 
     #[test]
     fn scan_project_files_imports_ai_context() {
-        let mut conn = test_db();
+        let conn = test_db();
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("AGENTS.md"), "# agent rules").unwrap();
         std::fs::write(dir.path().join("CLAUDE.md"), "claude notes").unwrap();
@@ -423,7 +423,7 @@ mod tests {
 
     #[test]
     fn scan_project_files_handles_nested_skill_dirs_and_junk() {
-        let mut conn = test_db();
+        let conn = test_db();
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("skills/react")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agents/skills/deep/nested")).unwrap();
